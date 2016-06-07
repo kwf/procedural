@@ -7,6 +7,9 @@ function method absurd<A>(): A
   absurd()
 }
 
+function method fst<A,B>(p: (A,B)): A { p.0 }
+function method snd<A,B>(p: (A,B)): B { p.1 }
+
 datatype List<A> = Cons(A, List<A>) | Nil
 
 function method length(xs: List): nat {
@@ -67,6 +70,14 @@ predicate method and(xs: List<bool>) {
   all(x => x, xs)
 }
 
+predicate method or(xs: List<bool>) {
+  any(x => x, xs)
+}
+
+function method union<A>(xs: List<set<A>>): set<A> {
+  foldr({}, ((x, y) => x + y), xs)
+}
+
 datatype Maybe<A> = Just(A) | Nothing
 
 function method mapMaybe<A,B>(x: Maybe<A>, f: A -> B): Maybe<B>
@@ -78,7 +89,6 @@ function method mapMaybe<A,B>(x: Maybe<A>, f: A -> B): Maybe<B>
     case Just(x) => Just(f(x))
 }
 
-
 function method bindMaybe<A,B>(x: Maybe<A>, f: A -> Maybe<B>): Maybe<B>
   requires forall x :: f.reads(x) == {}
   requires forall x :: f.requires(x)
@@ -86,6 +96,14 @@ function method bindMaybe<A,B>(x: Maybe<A>, f: A -> Maybe<B>): Maybe<B>
   match x
     case Nothing => Nothing
     case Just(x) => f(x)
+}
+
+function method isJust<A>(x: Maybe<A>): bool
+  ensures (exists y :: x == Just(y)) <==> isJust(x)
+{
+  match x
+    case Just(_) => true
+    case Nothing => false
 }
 
 datatype Either<A,B> = Left(A) | Right(B)
@@ -128,22 +146,25 @@ datatype Expr = Unit | False | True | Literal(int) | Id(Id)
 
 function method FV_Gamma_Expr(e: Expr): set<Id>
   decreases e
-  // TODO: Talk to Rustan about why I can't get things-in-terms-of-fold to
-  // pass the decreases check, and how to fix this. It's inhibiting my abstraction!
 {
   match e
-    case Unit => {}
-    case False => {}
-    case True => {}
-    case Literal(_) => {}
-    case Id(id) => {id}
-    case Not(e') => FV_Gamma_Expr(e')
-    case Apply(e1, _, e2) =>
-      FV_Gamma_Expr(e1) + FV_Gamma_Expr(e2)
-    case IfThenElse(e1, e2, e3) =>
-      FV_Gamma_Expr(e1) + FV_Gamma_Expr(e2) + FV_Gamma_Expr(e3)
-    case Call(_, es) =>
-      foldr({}, ((s1, s2) => s1 + s2), mapList(e => FV_Gamma_Expr(e), es))
+    case Unit                   => {}
+    case False                  => {}
+    case True                   => {}
+    case Literal(_)             => {}
+    case Id(id)                 => {id}
+    case Not(e1)                => FV_Gamma_Expr(e1)
+    case Apply(e1, _, e2)       => FV_Gamma_Expr(e1) + FV_Gamma_Expr(e2)
+    case IfThenElse(e1, e2, e3) => FV_Gamma_Expr(e1) + FV_Gamma_Expr(e2) + FV_Gamma_Expr(e3)
+    case Call(_, es)            => FV_Gamma_Expr_List(es) // union(mapList(e => FV_Gamma_Expr(e), es))
+}
+
+function method FV_Gamma_Expr_List(es: List<Expr>): set<Id>
+  decreases es
+{
+  match es
+    case Nil => {}
+    case Cons(e, es') => FV_Gamma_Expr(e) + FV_Gamma_Expr_List(es')
 }
 
 datatype Op = RelOp(RelOp) | BoolOp(BoolOp) | MathOp(MathOp)
@@ -172,6 +193,30 @@ datatype Statement = Var(Id, Type)
                    | Call(Maybe<Id>, Id, List<Expr>)
                    | Read(Maybe<Id>, Type)
                    | Print(FormatString, List<Expr>)
+
+function method FV_Gamma_Statement(s: Statement): set<Id>
+{
+  match s
+    case Var(v, _)             => {v}
+    case Assign(v, _)          => {v}
+    case IfThenElse(e, s1, s2) => FV_Gamma_Expr(e) + FV_Gamma_Block(s1) + FV_Gamma_Block(s2)
+    case While(e, s)           => FV_Gamma_Expr(e) + FV_Gamma_Block(s)
+    case Return(e)             => FV_Gamma_Expr(e)
+    case Call(maybeId, _, es)  =>
+      FV_Gamma_Expr_List(es) +
+      (match maybeId case Just(v) => {v} case Nothing => {})
+    case Read(maybeId, _)      =>
+      (match maybeId case Just(v) => {v} case Nothing => {})
+    case Print(_, es)          =>
+      FV_Gamma_Expr_List(es)
+}
+
+function method FV_Gamma_Block(ss: Block): set<Id>
+{
+  match ss
+    case Nil => {}
+    case Cons(s, ss') => FV_Gamma_Statement(s) + FV_Gamma_Block(ss')
+}
 
 type FormatString = List<Either<Type, string>>
 
@@ -245,46 +290,46 @@ predicate method TypeList(delta: Delta, gamma: Gamma, es: List<Expr>, ts: List<T
   // and(zipWith((e, t) => TypeExpr(delta, gamma, e, t), es, ts))
 }
 
-predicate TypeStatement(delta: Delta, gamma: Gamma, rho: Type, s: Statement, gamma': Gamma)
-  decreases s
-{
-  match s
-    case Var(id, t) =>
-      id !in gamma &&
-      gamma' == gamma[id := t]
-    case Assign(id, e) =>
-      id in gamma &&
-      TypeExpr(delta, gamma, e, gamma[id])
-    case IfThenElse(e, s1, s2) =>
-      TypeExpr(delta, gamma, e, Bool) &&
-      TypeBlock(delta, gamma, rho, s1, gamma') &&
-      TypeBlock(delta, gamma, rho, s1, gamma')
-    case While(e, s) =>
-      TypeExpr(delta, gamma, e, Bool) &&
-      TypeBlock(delta, gamma, rho, s, gamma)
-    case Call(maybeId, id, arguments) =>
-      id in delta &&
-      var (argTypes, retType, purity) := delta[id];
-        (match maybeId
-          case Just(v) => v in gamma && gamma[v] == retType
-          case Nothing => true) &&
-        TypeList(delta, gamma, arguments, argTypes)
-    case Return(e) =>
-      TypeExpr(delta, gamma, e, rho)
-    case Read(maybeId, t) =>
-      (match maybeId
-        case Nothing => true
-        case Just(v) =>
-          v in gamma && gamma[v] == t)
-    case Print(spec, arguments) =>
-      TypeList(delta, gamma, arguments, lefts(spec))
-}
+// predicate TypeStatement(delta: Delta, gamma: Gamma, rho: Type, s: Statement, gamma': Gamma)
+//   decreases s
+// {
+//   match s
+//     case Var(id, t) =>
+//       id !in gamma &&
+//       gamma' == gamma[id := t]
+//     case Assign(id, e) =>
+//       id in gamma &&
+//       TypeExpr(delta, gamma, e, gamma[id])
+//     case IfThenElse(e, s1, s2) =>
+//       TypeExpr(delta, gamma, e, Bool) &&
+//       TypeBlock(delta, gamma, rho, s1, gamma') &&
+//       TypeBlock(delta, gamma, rho, s1, gamma')
+//     case While(e, s) =>
+//       TypeExpr(delta, gamma, e, Bool) &&
+//       TypeBlock(delta, gamma, rho, s, gamma)
+//     case Call(maybeId, id, arguments) =>
+//       id in delta &&
+//       var (argTypes, retType, purity) := delta[id];
+//         (match maybeId
+//           case Just(v) => v in gamma && gamma[v] == retType
+//           case Nothing => true) &&
+//         TypeList(delta, gamma, arguments, argTypes)
+//     case Return(e) =>
+//       TypeExpr(delta, gamma, e, rho)
+//     case Read(maybeId, t) =>
+//       (match maybeId
+//         case Nothing => true
+//         case Just(v) =>
+//           v in gamma && gamma[v] == t)
+//     case Print(spec, arguments) =>
+//       TypeList(delta, gamma, arguments, lefts(spec))
+// }
 
 function method CheckStatement(delta: Delta, gamma: Gamma, rho: Type, s: Statement): Maybe<Gamma>
   decreases s
   // soundness
-  ensures forall gamma' :: CheckStatement(delta, gamma, rho, s) == Just(gamma')
-                  ==> TypeStatement(delta, gamma, rho, s, gamma')
+  // ensures forall gamma' :: CheckStatement(delta, gamma, rho, s) == Just(gamma')
+  //                 ==> TypeStatement(delta, gamma, rho, s, gamma')
   // completeness (TODO: this isn't true yet -- need to prune domain of gamma')
   // ensures forall gamma' :: TypeStatement(delta, gamma, rho, s, gamma')
   //                 ==> CheckStatement(delta, gamma, rho, s) == Just(gamma')
@@ -304,8 +349,11 @@ function method CheckStatement(delta: Delta, gamma: Gamma, rho: Type, s: Stateme
       bindMaybe(CheckBlock(delta, gamma, rho, s2), gamma2 =>
       if gamma1 == gamma2 then Just(gamma1) else Nothing))
     case While(e, s) =>
-      if !TypeExpr(delta, gamma, e, Bool) then Nothing else
-      CheckBlock(delta, gamma, rho, s)
+      if !TypeExpr(delta, gamma, e, Bool)
+      then Nothing
+      else if CheckBlock(delta, gamma, rho, s) == Just(gamma)
+           then Just(gamma)
+           else Nothing
     case Call(maybeId, id, arguments) =>
       if id !in delta then Nothing else
       var (argTypes, retType, purity) := delta[id];
@@ -328,16 +376,36 @@ function method CheckStatement(delta: Delta, gamma: Gamma, rho: Type, s: Stateme
       if TypeList(delta, gamma, arguments, lefts(spec)) then Just(gamma) else Nothing
 }
 
-predicate TypeBlock(delta: Delta, gamma: Gamma, rho: Type, ss: Block, gamma'': Gamma)
-  decreases ss
-{
-  match ss
-    case Nil => true
-    case Cons(s, ss') =>
-      exists gamma' ::
-        TypeStatement(delta, gamma, rho, s, gamma') &&
-        TypeBlock(delta, gamma', rho, ss', gamma'')
-}
+// inductive lemma CheckStatement_sound(delta: Delta, gamma: Gamma, rho: Type, s: Statement, gamma': Gamma)
+//   requires CheckStatement(delta, gamma, rho, s) == Just(gamma')
+//   ensures  TypeStatement(delta, gamma, rho, s, gamma')
+// {
+//   match s
+//     case Var(id, t) =>
+//     case Assign(id, e) =>
+//     case IfThenElse(e, s1, s2) =>
+//       CheckBlock_sound(delta, gamma, rho, s1, gamma');
+//       CheckBlock_sound(delta, gamma, rho, s2, gamma');
+//     case While(e, s) =>
+//       if gamma == gamma' {
+//         CheckBlock_sound(delta, gamma, rho, s, gamma);
+//       }
+//     case Call(maybeId, id, arguments) =>
+//     case Return(e) =>
+//     case Read(maybeId, t) =>
+//     case Print(spec, arguments) =>
+// }
+
+// predicate TypeBlock(delta: Delta, gamma: Gamma, rho: Type, ss: Block, gamma'': Gamma)
+//   decreases ss
+// {
+//   match ss
+//     case Nil => true
+//     case Cons(s, ss') =>
+//       exists gamma' ::
+//         TypeStatement(delta, gamma, rho, s, gamma') &&
+//         TypeBlock(delta, gamma', rho, ss', gamma'')
+// }
 
 function method CheckBlock(delta: Delta, gamma: Gamma, rho: Type, ss: Block): Maybe<Gamma>
   decreases ss
@@ -349,7 +417,28 @@ function method CheckBlock(delta: Delta, gamma: Gamma, rho: Type, ss: Block): Ma
       CheckBlock(delta, gamma', rho, ss'))
 }
 
-predicate certainBlock(ss: Block)
+// inductive lemma CheckBlock_sound(delta: Delta, gamma: Gamma, rho: Type, ss: Block, gamma'': Gamma)
+//   requires CheckBlock(delta, gamma, rho, ss) == Just(gamma'')
+//   ensures  TypeBlock(delta, gamma, rho, ss, gamma'')
+// {
+//   match ss
+//     case Nil =>
+//     case Cons(s, ss') =>
+//       var gamma' :| CheckStatement(delta, gamma, rho, s) == Just(gamma');
+//       CheckStatement_sound(delta, gamma, rho, s, gamma');
+//       CheckBlock_sound(delta, gamma', rho, ss', gamma'');
+//       CheckBlock_reassemble(delta, gamma, rho, s, ss', gamma', gamma'');
+// }
+
+// lemma CheckBlock_reassemble(delta: Delta, gamma: Gamma, rho: Type, s: Statement, ss: Block, gamma': Gamma, gamma'': Gamma)
+//   requires CheckBlock(delta, gamma, rho, Cons(s, ss)) == Just(gamma'')
+//   requires TypeStatement(delta, gamma, rho, s, gamma')
+//   requires TypeBlock(delta, gamma', rho, ss, gamma'')
+//   ensures  TypeBlock(delta, gamma, rho, Cons(s, ss), gamma'')
+// {
+// }
+
+predicate method certainBlock(ss: Block)
 {
   match ss
     case Nil => false
@@ -357,7 +446,7 @@ predicate certainBlock(ss: Block)
   // any(x => certainStatement(x), ss)
 }
 
-predicate certainStatement(s: Statement)
+predicate method certainStatement(s: Statement)
 {
   match s
     case Return(_)             => true
@@ -370,7 +459,7 @@ predicate certainStatement(s: Statement)
     case Print(_, _)           => false
 }
 
-predicate pureBlock(delta: Delta, ss: Block)
+predicate method pureBlock(delta: Delta, ss: Block)
 {
   match ss
     case Nil => true
@@ -378,7 +467,7 @@ predicate pureBlock(delta: Delta, ss: Block)
   // all(x => pureStatement(delta, x), ss)
 }
 
-predicate pureStatement(delta: Delta, s: Statement)
+predicate method pureStatement(delta: Delta, s: Statement)
 {
   match s
     case Print(_, _)           => false
@@ -394,7 +483,7 @@ predicate pureStatement(delta: Delta, s: Statement)
       purity == Pure)
 }
 
-function mapFromList<A, B>(pairs: List<(A, B)>): map<A,B> {
+function method mapFromList<A, B>(pairs: List<(A, B)>): map<A,B> {
   foldr(map[],
         ((ab: (A, B), m: map<A,B>) =>
             var (a, b) := ab;
@@ -402,30 +491,28 @@ function mapFromList<A, B>(pairs: List<(A, B)>): map<A,B> {
         pairs)
 }
 
-predicate noDuplicates<A>(xs: List<A>) {
-  Nothing !=
-    foldr(Just({}),
-    ((x, ms: Maybe<set<A>>) => bindMaybe(ms, s =>
-    if x in s then Nothing else Just(s + {x}))),
-    xs)
+function method elements<A>(xs: List<A>): set<A>
+{
+  foldr({}, ((x, s) => {x} + s), xs)
 }
 
-function fst<A,B>(p: (A,B)): A { p.0 }
-function snd<A,B>(p: (A,B)): B { p.1 }
+predicate method noDuplicates<A(==)>(xs: List<A>) {
+  |elements(xs)| == length(xs)
+}
 
-predicate TypeDecl(delta: Delta, declaration: Decl) {
+predicate method TypeDecl(delta: Delta, declaration: Decl) {
   either(
     ((func: Function) =>
       var Function(args, retType, ss) := func;
-      pureBlock(delta, ss) &&
+      pureBlock(delta, ss) &&            //            <--- functions must be pure
       (retType != Type.Unit ==> certainBlock(ss)) &&
       noDuplicates(mapList(fst, args)) &&
-      exists gamma' :: TypeBlock(delta, mapFromList(args), retType, ss, gamma')),
+      isJust(CheckBlock(delta, mapFromList(args), retType, ss))),
     ((proc: Procedure) =>
       var Procedure(args, retType, ss) := proc;
       (retType != Type.Unit ==> certainBlock(ss)) &&
       noDuplicates(mapList(fst, args)) &&
-      exists gamma' :: TypeBlock(delta, mapFromList(args), retType, ss, gamma')),
+      isJust(CheckBlock(delta, mapFromList(args), retType, ss))),
     declaration)
 }
 
