@@ -24,6 +24,14 @@ lemma {:induction xs} SmallerThanList<A>(x: A, xs: List<A>)
 {
 }
 
+lemma AllSmallerThanList<A>(xs: List<A>)
+  ensures forall x :: x in Elements(xs) ==> x < xs
+{
+  forall x | x in Elements(xs) {
+    SmallerThanList(x, xs);
+  }
+}
+
 function method MapList<A,B>(f: A -> B, xs: List<A>): List<B>
   requires forall x :: f.reads(x) == {}
   requires forall x :: x in Elements(xs) ==> f.requires(x)
@@ -36,7 +44,7 @@ function method MapList<A,B>(f: A -> B, xs: List<A>): List<B>
 
 function method ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C>
   requires forall x, y :: f.reads(x, y) == {}
-  requires forall x, y :: f.requires(x, y)
+  requires forall x, y :: x in Elements(xs) && y in Elements(ys) ==> f.requires(x, y)
   requires Length(xs) == Length(ys)
   ensures  Length(ZipWith(f, xs, ys)) == Length(xs) == Length(ys)
 {
@@ -194,7 +202,8 @@ function method FV_Gamma_Expr(e: Expr): set<Id>
     case Not(e1)                => FV_Gamma_Expr(e1)
     case Apply(e1, _, e2)       => FV_Gamma_Expr(e1) + FV_Gamma_Expr(e2)
     case IfThenElse(e1, e2, e3) => FV_Gamma_Expr(e1) + FV_Gamma_Expr(e2) + FV_Gamma_Expr(e3)
-    case Call(_, es)            => Union(MapList(e' requires e' < e => FV_Gamma_Expr(e'), es))
+    case Call(_, es)            => AllSmallerThanList(es);
+                                   Union(MapList(e' requires e' < e => FV_Gamma_Expr(e'), es))
 }
 
 function method FV_Gamma_Expr_List(es: List<Expr>): set<Id>
@@ -273,13 +282,13 @@ predicate method TypeExpr(delta: Delta, gamma: Gamma, e: Expr, t: Type) {
 predicate method TypeList(delta: Delta, gamma: Gamma, es: List<Expr>, ts: List<Type>)
 {
   Length(es) == Length(ts) &&
-    (match (es, ts)
+    /*(match (es, ts)
       case (Nil, Nil) => true
       case (Cons(x, xs'), Nil) => assert (Length(Cons(x, xs')) != Length<Expr>(Nil)); Absurd()
       case (Nil, Cons(y, ys')) => assert (Length(Cons(y, ys')) != Length<Type>(Nil)); Absurd()
       case (Cons(e, es'), Cons(t, ts')) =>
-        TypeExpr(delta, gamma, e, t) && TypeList(delta, gamma, es', ts'))
-  // and(zipWith((e, t) => TypeExpr(delta, gamma, e, t), es, ts))
+        TypeExpr(delta, gamma, e, t) && TypeList(delta, gamma, es', ts'))*/
+  And(ZipWith((e, t) => TypeExpr(delta, gamma, e, t), es, ts))
 }
 
 function method CheckStatement(delta: Delta, gamma: Gamma, rho: Type, s: Statement): Maybe<Gamma>
