@@ -42,6 +42,23 @@ function method MapList<A,B>(f: A -> B, xs: List<A>): List<B>
     case Cons(x, xs') => Cons(f(x), MapList(f, xs'))
 }
 
+function method MapFromList<A, B>(pairs: List<(A, B)>): map<A,B> {
+  Foldr(map[],
+    ((ab: (A, B), m: map<A,B>) =>
+    var (a, b) := ab;
+    m[a := b]),
+      pairs)
+}
+
+function method Elements<A>(xs: List<A>): set<A>
+{
+  Foldr({}, ((x, s) => {x} + s), xs)
+}
+
+predicate method NoDuplicates<A(==)>(xs: List<A>) {
+  |Elements(xs)| == Length(xs)
+}
+
 function method ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C>
   requires forall x, y :: f.reads(x, y) == {}
   requires forall x, y :: x in Elements(xs) && y in Elements(ys) ==> f.requires(x, y)
@@ -68,14 +85,14 @@ function method Foldr<A, B>(b: B, k: (A, B) -> B, xs: List<A>): B
 
 predicate method All<A>(p: A -> bool, xs: List<A>)
   requires forall x :: p.reads(x) == {}
-  requires forall x :: p.requires(x)
+  requires forall x :: x in Elements(xs) ==> p.requires(x)
 {
   Foldr(true, (x, y) => x && y, MapList(p, xs))
 }
 
 predicate method Any<A>(p: A -> bool, xs: List<A>)
   requires forall x :: p.reads(x) == {}
-  requires forall x :: p.requires(x)
+  requires forall x :: x in Elements(xs) ==> p.requires(x)
 {
   Foldr(false, (x, y) => x || y, MapList(p, xs))
 }
@@ -96,7 +113,7 @@ datatype Maybe<A> = Just(A) | Nothing
 
 function method MapMaybe<A,B>(x: Maybe<A>, f: A -> B): Maybe<B>
   requires forall x :: f.reads(x) == {}
-  requires forall x :: f.requires(x)
+  requires forall y :: x == Just(y) ==> f.requires(y)
 {
   match x
     case Nothing => Nothing
@@ -105,7 +122,7 @@ function method MapMaybe<A,B>(x: Maybe<A>, f: A -> B): Maybe<B>
 
 function method BindMaybe<A,B>(x: Maybe<A>, f: A -> Maybe<B>): Maybe<B>
   requires forall x :: f.reads(x) == {}
-  requires forall x :: f.requires(x)
+  requires forall y :: x == Just(y) ==> f.requires(y)
 {
   match x
     case Nothing => Nothing
@@ -125,8 +142,8 @@ datatype Either<A,B> = Left(A) | Right(B)
 function method Either<A,B,R>(f: A -> R, g: B -> R, e: Either<A,B>): R
   requires forall a :: f.reads(a) == {}
   requires forall b :: g.reads(b) == {}
-  requires forall a :: f.requires(a)
-  requires forall b :: g.requires(b)
+  requires forall a :: e == Left(a) ==> f.requires(a)
+  requires forall b :: e == Right(b) ==> g.requires(b)
 {
   match e
     case Left(l)  => f(l)
@@ -146,6 +163,8 @@ function method Rights<A,B>(es: List<Either<A,B>>): List<B> {
     case Cons(Left(_),  es') => Rights(es')
     case Cons(Right(r), es') => Cons(r, Rights(es'))
 }
+
+
 // SYNTAX
 
 type Id = int
@@ -156,8 +175,6 @@ datatype Expr = Unit | False | True | Literal(int) | Id(Id)
               | Not(Expr) | Apply(Expr, Op, Expr)
               | IfThenElse(Expr, Expr, Expr)
               | Call(Id, List<Expr>)
-
-
 
 datatype Op = RelOp(RelOp) | BoolOp(BoolOp) | MathOp(MathOp)
 
@@ -206,14 +223,6 @@ function method FV_Gamma_Expr(e: Expr): set<Id>
                                    Union(MapList(e' requires e' < e => FV_Gamma_Expr(e'), es))
 }
 
-function method FV_Gamma_Expr_List(es: List<Expr>): set<Id>
-  decreases es
-{
-  match es
-    case Nil => {}
-    case Cons(e, es') => FV_Gamma_Expr(e) + FV_Gamma_Expr_List(es')
-}
-
 function method FV_Gamma_Statement(s: Statement): set<Id>
 {
   match s
@@ -223,19 +232,20 @@ function method FV_Gamma_Statement(s: Statement): set<Id>
     case While(e, s)           => FV_Gamma_Expr(e) + FV_Gamma_Block(s)
     case Return(e)             => FV_Gamma_Expr(e)
     case Call(maybeId, _, es)  =>
-      FV_Gamma_Expr_List(es) +
+      (AllSmallerThanList(es);
+      Union(MapList(e' requires e' < es => FV_Gamma_Expr(e'), es))) +
       (match maybeId case Just(v) => {v} case Nothing => {})
     case Read(maybeId, _)      =>
       (match maybeId case Just(v) => {v} case Nothing => {})
     case Print(_, es)          =>
-      FV_Gamma_Expr_List(es)
+      AllSmallerThanList(es);
+      Union(MapList(e' requires e' < es => FV_Gamma_Expr(e'), es))
 }
 
 function method FV_Gamma_Block(ss: Block): set<Id>
 {
-  match ss
-    case Nil => {}
-    case Cons(s, ss') => FV_Gamma_Statement(s) + FV_Gamma_Block(ss')
+  AllSmallerThanList(ss);
+  Union(MapList(e' requires e' < ss => FV_Gamma_Statement(e'), ss))
 }
 
 
@@ -282,13 +292,9 @@ predicate method TypeExpr(delta: Delta, gamma: Gamma, e: Expr, t: Type) {
 predicate method TypeList(delta: Delta, gamma: Gamma, es: List<Expr>, ts: List<Type>)
 {
   Length(es) == Length(ts) &&
-    /*(match (es, ts)
-      case (Nil, Nil) => true
-      case (Cons(x, xs'), Nil) => assert (Length(Cons(x, xs')) != Length<Expr>(Nil)); Absurd()
-      case (Nil, Cons(y, ys')) => assert (Length(Cons(y, ys')) != Length<Type>(Nil)); Absurd()
-      case (Cons(e, es'), Cons(t, ts')) =>
-        TypeExpr(delta, gamma, e, t) && TypeList(delta, gamma, es', ts'))*/
-  And(ZipWith((e, t) => TypeExpr(delta, gamma, e, t), es, ts))
+  (AllSmallerThanList(es); AllSmallerThanList(ts);
+  And(ZipWith((e, t) requires e < es && t < ts =>
+    TypeExpr(delta, gamma, e, t), es, ts)))
 }
 
 function method CheckStatement(delta: Delta, gamma: Gamma, rho: Type, s: Statement): Maybe<Gamma>
@@ -348,10 +354,7 @@ function method CheckBlock(delta: Delta, gamma: Gamma, rho: Type, ss: Block): Ma
 
 predicate method CertainBlock(ss: Block)
 {
-  match ss
-    case Nil => false
-    case Cons(s, ss') => CertainStatement(s) || CertainBlock(ss')
-  // any(x => CertainStatement(x), ss)
+  AllSmallerThanList(ss); Any(x requires x < ss => CertainStatement(x), ss)
 }
 
 predicate method CertainStatement(s: Statement)
@@ -369,10 +372,7 @@ predicate method CertainStatement(s: Statement)
 
 predicate method PureBlock(delta: Delta, ss: Block)
 {
-  match ss
-    case Nil => true
-    case Cons(s, ss') => PureStatement(delta, s) && PureBlock(delta, ss')
-  // all(x => PureStatement(delta, x), ss)
+  AllSmallerThanList(ss); All(x requires x < ss => PureStatement(delta, x), ss)
 }
 
 predicate method PureStatement(delta: Delta, s: Statement)
@@ -389,23 +389,6 @@ predicate method PureStatement(delta: Delta, s: Statement)
       id in delta &&
       (var (_, _, purity) := delta[id];
       purity == Pure)
-}
-
-function method MapFromList<A, B>(pairs: List<(A, B)>): map<A,B> {
-  Foldr(map[],
-        ((ab: (A, B), m: map<A,B>) =>
-            var (a, b) := ab;
-            m[a := b]),
-        pairs)
-}
-
-function method Elements<A>(xs: List<A>): set<A>
-{
-  Foldr({}, ((x, s) => {x} + s), xs)
-}
-
-predicate method NoDuplicates<A(==)>(xs: List<A>) {
-  |Elements(xs)| == Length(xs)
 }
 
 predicate method TypeDecl(delta: Delta, declaration: Decl) {
@@ -428,6 +411,8 @@ predicate method TypeDecl(delta: Delta, declaration: Decl) {
 
 type State = map<Id, Expr>
 
+type TopLevel = map<Id, Decl>
+
 predicate method Value(e: Expr) {
   match e
     case Unit                => true
@@ -441,4 +426,94 @@ predicate method Value(e: Expr) {
     case Apply(_, _, _)      => false
 }
 
-inductive predicate Eval(delta: Delta, s: State, e: Expr, v: Expr)
+predicate NotE(e: Expr, f: Expr) {
+  Just(true) == BindMaybe(ExtractBool(e), e =>
+                BindMaybe(ExtractBool(f), f =>
+                Just(e == !f)))
+}
+
+predicate ApplyE(e1: Expr, op: Op, e2: Expr, v: Expr) {
+  match op
+    case BoolOp(boolOp) =>
+      Just(v) == BindMaybe(ExtractBool(e1), b1 =>
+                 BindMaybe(ExtractBool(e2), b2 =>
+                 Just(EmbedBool(BoolOpDenotes(boolOp)(b1, b2)))))
+    case RelOp(relOp) =>
+      Just(v) == BindMaybe(ExtractLiteral(e1), v1 =>
+                 BindMaybe(ExtractLiteral(e2), v2 =>
+                 Just(EmbedBool(RelOpDenotes(relOp)(v1, v2)))))
+    case MathOp(mathOp) =>
+      Just(v) == BindMaybe(ExtractLiteral(e1), v1 =>
+                 BindMaybe(ExtractLiteral(e2), v2 =>
+                 MapMaybe(MathOpDenotes(mathOp)(v1, v2), x => Literal(x))))
+}
+
+function ExtractBool(e: Expr): Maybe<bool> {
+  if e == True  then Just(true)  else
+  if e == False then Just(false) else
+  Nothing
+}
+
+function EmbedBool(b: bool): Expr {
+  if b then True else False
+}
+
+function ExtractLiteral(e: Expr): Maybe<int> {
+  if !exists l :: e == Literal(l) then Nothing
+  else var l :| e == Literal(l); Just(l)
+}
+
+function BoolOpDenotes(op: BoolOp): (bool, bool) -> bool {
+  match op
+    case Or  => (b1, b2) => b1 || b2
+    case And => (b1, b2) => b1 && b2
+}
+
+function RelOpDenotes(op: RelOp): (int, int) -> bool {
+  match op
+    case Eq  => (v1, v2) => v1 == v2
+    case NEq => (v1, v2) => v1 != v2
+    case LT  => (v1, v2) => v1 < v2
+    case LTE => (v1, v2) => v1 <= v2
+}
+
+function MathOpDenotes(op: MathOp): (int, int) -> Maybe<int> {
+  match op
+    case Plus      => (v1, v2) => Just(v1 + v2)
+    case Times     => (v1, v2) => Just(v1 * v2)
+    case Minus     => (v1, v2) => Just(v1 - v2)
+    case DividedBy => (v1, v2) => if v2 != 0 then Just(v1 / v2) else Nothing
+    case Mod       => (v1, v2) => if v2 != 0 then Just(v1 % v2) else Nothing
+}
+
+inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, v: Expr) {
+  match e
+    case Unit =>
+      v == Expr.Unit
+    case True =>
+      v == True
+    case False =>
+      v == False
+    case Literal(l) =>
+      Literal(l) == v
+    case Id(id) =>
+      id in s && s[id] == v
+    case Not(e') =>
+      exists v' ::
+      EvalExpr(d, s, e', v') &&
+      NotE(v, v')
+    case Apply(e1, op, e2) =>
+      exists v1, v2 ::
+      EvalExpr(d, s, e1, v1) &&
+      EvalExpr(d, s, e2, v2) &&
+      ApplyE(v1, op, v2, v)
+    case IfThenElse(e1, e2, e3) =>
+      exists b, b' :: EvalExpr(d, s, e1, b) &&
+      ExtractBool(b) == Just(b') &&
+      if b' then EvalExpr(d, s, e2, v)
+            else EvalExpr(d, s, e3, v)
+    case Call(p, es) =>
+      exists vs ::
+      And(ZipWith((e, v) => EvalExpr(d, s, e, v), es, vs)) &&
+      EvalCall(p, vs, v)
+}
