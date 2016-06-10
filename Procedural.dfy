@@ -10,7 +10,7 @@ function method Absurd<A>(): A
 function method Fst<A,B>(p: (A,B)): A { p.0 }
 function method Snd<A,B>(p: (A,B)): B { p.1 }
 
-datatype List<A> = Cons(A, List<A>) | Nil
+datatype List<A> = Cons(Head: A, Tail: List<A>) | Nil
 
 function method Length(xs: List): nat {
   match xs
@@ -73,6 +73,13 @@ function method ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C
     case (Nil, Cons(y, ys')) => assert (Length(Cons(y, ys')) != Length<B>(Nil)); Absurd()
 }
 
+function method Zip<A,B>(xs: List<A>, ys: List<B>): List<(A,B)>
+  requires Length(xs) == Length(ys)
+  ensures  Length(Zip(xs, ys)) == Length(xs) == Length(ys)
+{
+  ZipWith((x,y) => (x,y), xs, ys)
+}
+
 function method Foldr<A, B>(b: B, k: (A, B) -> B, xs: List<A>): B
   requires forall x, y :: k.reads(x, y) == {}
   requires forall x, y :: k.requires(x, y)
@@ -109,7 +116,7 @@ function method Union<A>(xs: List<set<A>>): set<A> {
   Foldr({}, ((x, y) => x + y), xs)
 }
 
-datatype Maybe<A> = Just(A) | Nothing
+datatype Maybe<A> = Just(FromJust: A) | Nothing
 
 function method MapMaybe<A,B>(x: Maybe<A>, f: A -> B): Maybe<B>
   requires forall x :: f.reads(x) == {}
@@ -411,109 +418,175 @@ predicate method TypeDecl(delta: Delta, declaration: Decl) {
 
 type State = map<Id, Expr>
 
-type TopLevel = map<Id, Decl>
+type TopLevel = map<Id, (List<Id>, Block)>
 
 predicate method Value(e: Expr) {
-  match e
-    case Unit                => true
-    case False               => true
-    case True                => true
-    case Literal(_)          => true
-    case Id(_)               => false
-    case Not(_)              => false
-    case IfThenElse(_, _, _) => false
-    case Call(_, _)          => false
-    case Apply(_, _, _)      => false
+  e.Unit? || e.False? || e.True? || e.Literal?
 }
 
-predicate NotE(e: Expr, f: Expr) {
-  Just(true) == BindMaybe(ExtractBool(e), e =>
-                BindMaybe(ExtractBool(f), f =>
-                Just(e == !f)))
+predicate NotDenotes(e1: Expr, e2: Expr) {
+  exists b1, b2 ::
+    IsBool(b1, e1) &&
+    IsBool(b2, e2) &&
+    b1 == !b2
 }
 
-predicate ApplyE(e1: Expr, op: Op, e2: Expr, v: Expr) {
+predicate ApplyDenotes(op: Op, e1: Expr, e2: Expr, result: Expr) {
   match op
     case BoolOp(boolOp) =>
-      Just(v) == BindMaybe(ExtractBool(e1), b1 =>
-                 BindMaybe(ExtractBool(e2), b2 =>
-                 Just(EmbedBool(BoolOpDenotes(boolOp)(b1, b2)))))
-    case RelOp(relOp) =>
-      Just(v) == BindMaybe(ExtractLiteral(e1), v1 =>
-                 BindMaybe(ExtractLiteral(e2), v2 =>
-                 Just(EmbedBool(RelOpDenotes(relOp)(v1, v2)))))
+      exists b1, b2, r ::
+        IsBool(b1, e1) &&
+        IsBool(b2, e1) &&
+        IsBool(r, result) &&
+        BoolOpDenotes(boolOp, b1, b2, r)
+    case RelOp(relOp)   =>
+      exists v1, v2, r ::
+        IsLiteral(v1, e1) &&
+        IsLiteral(v2, e2) &&
+        IsBool(r, result) &&
+        RelOpDenotes(relOp, v1, v2, r)
     case MathOp(mathOp) =>
-      Just(v) == BindMaybe(ExtractLiteral(e1), v1 =>
-                 BindMaybe(ExtractLiteral(e2), v2 =>
-                 MapMaybe(MathOpDenotes(mathOp)(v1, v2), x => Literal(x))))
+      exists v1, v2, r ::
+        IsLiteral(v1, e1) &&
+        IsLiteral(v2, e2) &&
+        IsLiteral(r, result) &&
+        MathOpDenotes(mathOp, v1, v2, r)
 }
 
-function ExtractBool(e: Expr): Maybe<bool> {
-  if e == True  then Just(true)  else
-  if e == False then Just(false) else
-  Nothing
+predicate IsBool(b: bool, e: Expr) {
+  if e == True then b == true else
+  if e == False then b == false else
+  false
 }
 
-function EmbedBool(b: bool): Expr {
-  if b then True else False
+predicate IsLiteral(i: int, e: Expr) {
+  if !e.Literal? then false
+  else match e case Literal(l) => l == i
 }
 
-function ExtractLiteral(e: Expr): Maybe<int> {
-  if !exists l :: e == Literal(l) then Nothing
-  else var l :| e == Literal(l); Just(l)
-}
-
-function BoolOpDenotes(op: BoolOp): (bool, bool) -> bool {
+predicate BoolOpDenotes(op: BoolOp, b1: bool, b2: bool, result: bool) {
   match op
-    case Or  => (b1, b2) => b1 || b2
-    case And => (b1, b2) => b1 && b2
+    case Or  => result == b1 || b2
+    case And => result == b1 && b2
 }
 
-function RelOpDenotes(op: RelOp): (int, int) -> bool {
+predicate RelOpDenotes(op: RelOp, v1: int, v2: int, result: bool) {
   match op
-    case Eq  => (v1, v2) => v1 == v2
-    case NEq => (v1, v2) => v1 != v2
-    case LT  => (v1, v2) => v1 < v2
-    case LTE => (v1, v2) => v1 <= v2
+    case Eq  => result == (v1 == v2)
+    case NEq => result == (v1 != v2)
+    case LT  => result == (v1 < v2)
+    case LTE => result == (v1 <= v2)
 }
 
-function MathOpDenotes(op: MathOp): (int, int) -> Maybe<int> {
+predicate MathOpDenotes(op: MathOp, v1: int, v2: int, result: int) {
   match op
-    case Plus      => (v1, v2) => Just(v1 + v2)
-    case Times     => (v1, v2) => Just(v1 * v2)
-    case Minus     => (v1, v2) => Just(v1 - v2)
-    case DividedBy => (v1, v2) => if v2 != 0 then Just(v1 / v2) else Nothing
-    case Mod       => (v1, v2) => if v2 != 0 then Just(v1 % v2) else Nothing
+    case Plus      => result == v1 + v2
+    case Times     => result == v1 * v2
+    case Minus     => result == v1 - v2
+    case DividedBy => if v2 != 0 then result == v1 / v2 else true  // division by zero is undefined
+    case Mod       => if v2 != 0 then result == v1 % v2 else true  // division by zero is undefined
 }
 
-inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, v: Expr) {
+inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, result: Expr) {
   match e
     case Unit =>
-      v == Expr.Unit
+      result == Expr.Unit
     case True =>
-      v == True
+      result == True
     case False =>
-      v == False
+      result == False
     case Literal(l) =>
-      Literal(l) == v
+      result == Literal(l)
     case Id(id) =>
-      id in s && s[id] == v
+      id in s && result == s[id]
     case Not(e') =>
-      exists v' ::
-      EvalExpr(d, s, e', v') &&
-      NotE(v, v')
+      exists r ::
+        EvalExpr(d, s, e', r) &&
+        NotDenotes(result, r)
     case Apply(e1, op, e2) =>
       exists v1, v2 ::
-      EvalExpr(d, s, e1, v1) &&
-      EvalExpr(d, s, e2, v2) &&
-      ApplyE(v1, op, v2, v)
+        EvalExpr(d, s, e1, v1) &&
+        EvalExpr(d, s, e2, v2) &&
+        ApplyDenotes(op, v1, v2, result)
     case IfThenElse(e1, e2, e3) =>
       exists b, b' :: EvalExpr(d, s, e1, b) &&
-      ExtractBool(b) == Just(b') &&
-      if b' then EvalExpr(d, s, e2, v)
-            else EvalExpr(d, s, e3, v)
+        IsBool(b', b) &&
+        if b' then EvalExpr(d, s, e2, result)
+              else EvalExpr(d, s, e3, result)
     case Call(p, es) =>
       exists vs ::
-      And(ZipWith((e, v) => EvalExpr(d, s, e, v), es, vs)) &&
-      EvalCall(p, vs, v)
+        And(ZipWith((e, v) => EvalExpr(d, s, e, v), es, vs)) &&
+        EvalCall(d, p, vs, result)
+}
+
+inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr) {
+  if p !in d then false else
+    var (params, body) := d[p];
+    var s := MapFromList(Zip(params, args));
+     (exists s' :: EvalBlock(d, body, s, s', Just(result))) ||                  // normal return
+    ((exists s' :: EvalBlock(d, body, s, s', Nothing)) && result == Expr.Unit)  // auto-unit return
+}
+
+inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>) {
+  match c
+    case Var(_, _) =>
+      result.Nothing? &&
+      s == s''
+    case Assign(id, e) =>
+      result.Nothing? &&
+      exists v ::
+        EvalExpr(d, s, e, v) &&
+        s'' == s[id := v]
+    case IfThenElse(e1, c2, c3) =>
+      exists v1, b1 ::
+        EvalExpr(d, s, e1, v1) &&
+        IsBool(b1, v1) &&
+        if b1 then EvalBlock(d, c2, s, s'', result)
+              else EvalBlock(d, c3, s, s'', result)
+    case While(e, c) =>
+      exists v, b ::
+        EvalExpr(d, s, e, v) &&
+        IsBool(b, v) &&
+        if !b
+          then s == s'' && result == Nothing
+          else
+            exists s' ::
+              (EvalBlock(d, c, s, s', Nothing) &&
+               EvalStatement(d, While(e, c), s', s'', result)) ||  // no return from this iteration
+              (EvalBlock(d, c, s, s', result))                     // or return right here, right now
+    case Return(e) =>
+      exists v ::
+      EvalExpr(d, s, e, v) &&
+      result == Just(v) &&
+      s == s''
+    case Read(maybeId, t) =>
+      result.Nothing? &&
+      if maybeId.Just? then var id := maybeId.FromJust;
+        if t.Unit? then s'' == s[id := Expr.Unit] else
+        if t.Bool? then s'' == s[id := True] || s'' == s[id := False] else
+        if t.Int?  then exists z :: s'' == s[id := z] else false
+      else s == s''
+    case Print(_, es) =>
+      result.Nothing? &&
+      exists vs ::
+        And(ZipWith((e, v) => EvalExpr(d, s, e, v), es, vs))
+    case Call(maybeId, p, es) =>
+      result.Nothing? &&
+      exists vs: List<Expr>, r ::
+        // AllSmallerThanList(es); AllSmallerThanList(vs);
+        And(ZipWith((e, v) /*requires e < es && v < vs*/ => EvalExpr(d, s, e, v), es, vs)) &&
+        EvalCall(d, p, vs, r) &&
+        if maybeId.Just? then var id := maybeId.FromJust;
+          s'' == s[id := r]
+        else s == s''
+}
+
+inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, result: Maybe<Expr>) {
+  match cs
+    case Nil =>
+      result.Nothing? && s == s''
+    case Cons(c, cs') =>
+      (result.Just? && EvalStatement(d, c, s, s'', result)) ||  // we returned early here
+      (exists s' :: EvalStatement(d, c, s, s', Nothing) &&      // or we didn't return early here
+                    EvalBlock(d, cs', s', s'', result))         // and we continue executing
 }
