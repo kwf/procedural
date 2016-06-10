@@ -515,13 +515,17 @@ inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, result: Expr) {
               else EvalExpr(d, s, e3, result)
     case Call(p, es) =>
       exists vs ::
-        And(ZipWith((e, v) => EvalExpr(d, s, e, v), es, vs)) &&
+        Length(vs) == Length(es) &&
+        (forall evaluation ::
+          evaluation in Elements(Zip(es, vs)) ==>
+            var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
         EvalCall(d, p, vs, result)
 }
 
 inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr) {
   if p !in d then false else
     var (params, body) := d[p];
+    if Length(params) != Length(args) then false else
     var s := MapFromList(Zip(params, args));
      (exists s' :: EvalBlock(d, body, s, s', Just(result))) ||                  // normal return
     ((exists s' :: EvalBlock(d, body, s, s', Nothing)) && result == Expr.Unit)  // auto-unit return
@@ -564,17 +568,27 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
       if maybeId.Just? then var id := maybeId.FromJust;
         if t.Unit? then s'' == s[id := Expr.Unit] else
         if t.Bool? then s'' == s[id := True] || s'' == s[id := False] else
-        if t.Int?  then exists z :: s'' == s[id := z] else false
+        if t.Int?  then
+          id in s'' && s''[id].Literal? &&  // in new state, the id is an int literal
+          (forall k :: (k  in s ==> k in s'')) &&  // new state has domain >= old state
+          forall k :: (k  in s && k != id ==> s[k] == s''[k]) &&  // all keys != id are preserved in new state
+                 (k !in s && k != id ==> k !in s'')  // no new keys (except maybe id) are introduced
+        else false
       else s == s''
     case Print(_, es) =>
       result.Nothing? &&
       exists vs ::
-        And(ZipWith((e, v) => EvalExpr(d, s, e, v), es, vs))
+        Length(vs) == Length(es) &&
+        (forall evaluation ::
+          evaluation in Elements(Zip(es, vs)) ==>
+            var (e, v) := evaluation; EvalExpr(d, s, e, v))
     case Call(maybeId, p, es) =>
       result.Nothing? &&
-      exists vs: List<Expr>, r ::
-        // AllSmallerThanList(es); AllSmallerThanList(vs);
-        And(ZipWith((e, v) /*requires e < es && v < vs*/ => EvalExpr(d, s, e, v), es, vs)) &&
+      exists vs, r ::
+        Length(vs) == Length(es) &&
+        (forall evaluation ::
+          evaluation in Elements(Zip(es, vs)) ==>
+            var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
         EvalCall(d, p, vs, r) &&
         if maybeId.Just? then var id := maybeId.FromJust;
           s'' == s[id := r]
