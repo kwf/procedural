@@ -418,7 +418,28 @@ predicate method TypeDecl(delta: Delta, declaration: Decl) {
 
 type State = map<Id, Expr>
 
+predicate TypeState(delta: Delta, gamma: Gamma, s: State) {
+  forall id :: id in s ==>
+          id in gamma &&
+          TypeExpr(delta, gamma, s[id], gamma[id])
+}
+
+predicate NormalizedState(s: State) {
+  forall id :: id in s ==> Value(s[id])
+}
+
 type TopLevel = map<Id, (List<Id>, Block)>
+
+predicate TypeTopLevel(delta: Delta, d: TopLevel) {
+  forall proc :: proc in d ==>
+            proc in delta &&
+            var (ps, body)      := d[proc];
+            var (ts, r, purity) := delta[proc];
+            if Length(ps) != Length(ts) then false else
+            match purity
+              case Pure   => TypeDecl(delta,   Left(Function(Zip(ps, ts), r, body)))
+              case Impure => TypeDecl(delta, Right(Procedure(Zip(ps, ts), r, body)))
+}
 
 predicate method Value(e: Expr) {
   e.Unit? || e.False? || e.True? || e.Literal?
@@ -527,8 +548,9 @@ inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr)
     var (params, body) := d[p];
     if Length(params) != Length(args) then false else
     var s := MapFromList(Zip(params, args));
-     (exists s' :: EvalBlock(d, body, s, s', Just(result))) ||                  // normal return
-    ((exists s' :: EvalBlock(d, body, s, s', Nothing)) && result == Expr.Unit)  // auto-unit return
+    exists s' ::
+       EvalBlock(d, body, s, s', Just(result)) ||                  // normal return
+      (EvalBlock(d, body, s, s', Nothing) && result == Expr.Unit)  // auto-unit return
 }
 
 inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>) {
@@ -604,3 +626,60 @@ inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, resu
       (exists s' :: EvalStatement(d, c, s, s', Nothing) &&      // or we didn't return early here
                     EvalBlock(d, cs', s', s'', result))         // and we continue executing
 }
+
+inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
+  requires NormalizedState(s)
+  requires EvalExpr(d, s, e, r)
+  ensures  Value(r)
+{
+  if !Value(e) && !e.Id? {
+    match e
+      case Id(id) =>
+      case Not(e') =>
+      case Apply(e1, op, e2) =>
+      case IfThenElse(e1, e2, e3) =>
+      case Call(p, es) =>
+        var (params, body) := d[p];
+        var vs :| Length(es) == Length(vs) &&
+                  (forall evaluation ::
+                    evaluation in Elements(Zip(es, vs)) ==>
+                    var (e, v) := evaluation; EvalExpr(d, s, e, v));
+        var s := MapFromList(Zip(params, vs));
+        assume NormalizedState(s);
+        if s' :| EvalBlock(d, body, s, s', Just(r)) {
+          NormalFormBigStepReturn(d, body, s, s', r);
+        } else if s' :| EvalBlock(d, body, s, s', Nothing) {
+          if !r.Unit? {
+            assert !EvalCall(d, p, vs, r);
+            assert !EvalExpr(d, s, Expr.Call(p, es), r);
+            assert false;
+          }
+        }
+  }
+}
+
+// inductive lemma DeterministicReturn(d: TopLevel, cs: Block, s: State, s': State, r: Maybe<Expr>, r': Maybe<Expr>)
+//   requires EvalBlock(d, cs, s, s', r)
+//   requires EvalBlock(d, cs, s, s', r')
+//   ensures  r.Just? <==> r'.Just?
+// {
+// }
+
+inductive lemma NormalFormBigStepReturn(d: TopLevel, cs: Block, s: State, s': State, r: Expr)
+  requires NormalizedState(s)
+  requires EvalBlock(d, cs, s, s', Just(r))
+  ensures  Value(r)
+{
+}
+
+inductive lemma PreservationBigStepExpr(d: TopLevel,  delta: Delta,
+                                        s: State,     gamma: Gamma,
+                                        e: Expr,      t: Type,
+                                        r: Expr)
+  requires TypeTopLevel(delta, d)        // top level is well-typed
+  requires TypeState(delta, gamma, s)    // environment is well-typed
+  requires NormalizedState(s)            // environment contains only values
+  requires TypeExpr(delta, gamma, e, t)  // e has type t
+  requires EvalExpr(d, s, e, r)          // e evaluates to r
+  ensures  TypeExpr(delta, gamma, r, t)  // ... then r also will have type t
+
