@@ -544,13 +544,13 @@ inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, result: Expr) {
 }
 
 inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr) {
-  if p !in d then false else
-    var (params, body) := d[p];
-    if Length(params) != Length(args) then false else
-    var s := MapFromList(Zip(params, args));
-    exists s' ::
-       EvalBlock(d, body, s, s', Just(result)) ||                  // normal return
-      (EvalBlock(d, body, s, s', Nothing) && result == Expr.Unit)  // auto-unit return
+  p in d &&
+  var (params, body) := d[p];
+  Length(params) == Length(args) &&
+  var s := MapFromList(Zip(params, args));
+  exists s' ::
+     EvalBlock(d, body, s, s', Just(result)) ||                  // normal return
+    (EvalBlock(d, body, s, s', Nothing) && result == Expr.Unit)  // auto-unit return
 }
 
 inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>) {
@@ -628,13 +628,13 @@ inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, resu
 }
 
 inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
+  decreases e
   requires NormalizedState(s)
   requires EvalExpr(d, s, e, r)
   ensures  Value(r)
 {
   if !Value(e) && !e.Id? {
     match e
-      case Id(id) =>
       case Not(e') =>
       case Apply(e1, op, e2) =>
       case IfThenElse(e1, e2, e3) =>
@@ -643,19 +643,52 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
         var vs :| Length(es) == Length(vs) &&
                   (forall evaluation ::
                     evaluation in Elements(Zip(es, vs)) ==>
-                    var (e, v) := evaluation; EvalExpr(d, s, e, v));
-        var s := MapFromList(Zip(params, vs));
-        assume NormalizedState(s);
-        if s' :| EvalBlock(d, body, s, s', Just(r)) {
-          NormalFormBigStepReturn(d, body, s, s', r);
-        } else if s' :| EvalBlock(d, body, s, s', Nothing) {
-          if !r.Unit? {
-            assert !EvalCall(d, p, vs, r);
-            assert !EvalExpr(d, s, Expr.Call(p, es), r);
-            assert false;
-          }
+                    var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
+                    EvalCall(d, p, vs, r);
+        ArgumentsAreValues(d, s, es, vs);
+        NormalFormNewState(params, vs);
+        var s0 := MapFromList(Zip(params, vs));
+        assert NormalizedState(s0);
+        var s' :| EvalBlock(d, body, s0, s', Just(r)) ||
+                 (EvalBlock(d, body, s0, s', Nothing) && r == Expr.Unit);
+        if EvalBlock(d, body, s0, s', Just(r)) {
+          NormalFormBigStepBlockReturn(d, body, s0, s', r);
         }
   }
+}
+
+// TODO: This ought to verify, but doesn't, strangely. Bug?
+inductive lemma ArgumentsAreValues(d: TopLevel, s: State, es: List<Expr>, vs: List<Expr>)
+  decreases es
+  requires NormalizedState(s)
+  requires Length(es) == Length(vs)
+  requires (forall evaluation :: evaluation in Elements(Zip(es, vs)) ==> var (e, v) := evaluation; EvalExpr(d, s, e, v))
+  ensures forall v :: v in Elements(vs) ==> Value(v)
+{
+  if !vs.Nil? {
+    assert Elements(Zip(es.Tail, vs.Tail)) <= Elements(Zip(es, vs));
+    assert EvalExpr#[_k](d, s, es.Head, vs.Head);
+    AllSmallerThanList(es);
+    NormalFormBigStepExpr#[_k](d, s, es.Head, vs.Head);
+    ArgumentsAreValues#[_k](d, s, es.Tail, vs.Tail);
+    assert Value(vs.Head);
+    assert forall v :: v in Elements(vs.Tail) ==> Value(v);
+    assert Elements(vs) == {vs.Head} + Elements(vs.Tail);
+    assert forall v :: v in {vs.Head} + Elements(vs.Tail) ==> Value(v);
+    assert forall v :: v in Elements(vs) ==> Value(v);
+  } else {
+  }
+}
+
+lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
+  requires Length(vs) == Length(params)
+  requires forall v :: v in Elements(vs) ==> Value(v)
+  ensures NormalizedState(MapFromList(Zip(params, vs)))
+{
+  match vs
+    case Nil =>
+    case Cons(_, _) =>
+      NormalFormNewState(params.Tail, vs.Tail);
 }
 
 // inductive lemma DeterministicReturn(d: TopLevel, cs: Block, s: State, s': State, r: Maybe<Expr>, r': Maybe<Expr>)
@@ -665,12 +698,32 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
 // {
 // }
 
-inductive lemma NormalFormBigStepReturn(d: TopLevel, cs: Block, s: State, s': State, r: Expr)
+inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s'': State, r: Expr)
   requires NormalizedState(s)
-  requires EvalBlock(d, cs, s, s', Just(r))
+  requires EvalBlock(d, cs, s, s'', Just(r))
   ensures  Value(r)
 {
+  match cs
+    case Nil =>
+    case Cons(c, cs') =>
+      if EvalStatement(d, c, s, s'', Just(r)) {
+        NormalFormBigStepStatementReturn(d, c, s, s'', r);
+      } else {
+        var s' :| EvalStatement(d, c, s, s', Nothing) && EvalBlock(d, cs', s', s'', Just(r));
+        NormalFormBigStepBlockReturn(d, cs', s', s'', r);
+      }
+      //(exists s' :: EvalStatement(d, c, s, s', Nothing) &&      // or we didn't return early here
+      //              EvalBlock(d, cs', s', s'', result))         // and we continue executing
 }
+
+inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: State, s'': State, r: Expr)
+  requires NormalizedState(s)
+  requires EvalStatement(d, c, s, s'', Just(r))
+  ensures  Value(r)
+/*{
+}*/
+
+// TODO: Normalized state preserved by statements / blocks
 
 inductive lemma PreservationBigStepExpr(d: TopLevel,  delta: Delta,
                                         s: State,     gamma: Gamma,
