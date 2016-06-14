@@ -579,7 +579,7 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
             exists s' ::
               (EvalBlock(d, c, s, s', Nothing) &&
                EvalStatement(d, While(e, c), s', s'', result)) ||  // no return from this iteration
-              (EvalBlock(d, c, s, s', result))                     // or return right here, right now
+              (result.Just? && EvalBlock(d, c, s, s', result))                     // or return right here, right now
     case Return(e) =>
       exists v ::
       EvalExpr(d, s, e, v) &&
@@ -599,6 +599,7 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
       else s == s''
     case Print(_, es) =>
       result.Nothing? &&
+      s == s'' &&
       exists vs ::
         Length(vs) == Length(es) &&
         (forall evaluation ::
@@ -724,6 +725,61 @@ inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: S
 }*/
 
 // TODO: Normalized state preserved by statements / blocks
+
+inductive lemma NormalizedStatePreservedBlock(d: TopLevel, cs: Block, s: State, s': State, r: Maybe<Expr>)
+  requires NormalizedState(s)
+  requires EvalBlock(d, cs, s, s', r)
+  ensures  NormalizedState(s')
+{
+}
+
+inductive lemma NormalizedStatePreservedStatement(d: TopLevel, c: Statement, s: State, s'': State, r: Maybe<Expr>)
+  requires NormalizedState(s)
+  requires EvalStatement(d, c, s, s'', r)
+  ensures  NormalizedState(s'')
+{
+  match c
+    case Print(_, _)           =>
+    case Read(_, _)            =>
+    case IfThenElse(e1, c1, c2) =>
+      var v1, b1 :| EvalExpr(d, s, e1, v1) &&
+                    IsBool(b1, v1) &&
+                    if b1 then EvalBlock(d, c1, s, s'', r)
+                          else EvalBlock(d, c2, s, s'', r);
+      if b1 {
+        NormalizedStatePreservedBlock(d, c1, s, s'', r);
+      } else {
+        NormalizedStatePreservedBlock(d, c2, s, s'', r);
+      }
+    case While(e, c)           =>
+      var v, b :| EvalExpr(d, s, e, v) &&
+                  IsBool(b, v) &&
+                  if !b
+                     then s == s'' && r == Nothing
+                     else
+                       exists s' ::
+                       (EvalBlock(d, c, s, s', Nothing) &&
+                        EvalStatement(d, While(e, c), s', s'', r)) ||
+                       (r.Just? && EvalBlock(d, c, s, s', r));
+      if b {
+        var s' :| (EvalBlock(d, c, s, s', Nothing) &&
+                   EvalStatement(d, While(e, c), s', s'', r)) ||
+                  (r.Just? && EvalBlock(d, c, s, s', r));
+        if EvalBlock(d, c, s, s', r) && r.Just? {
+          NormalizedStatePreservedBlock(d, c, s, s', r);
+          assume s' == s''; // need to prove this: is it true?
+        } else {
+          NormalizedStatePreservedBlock(d, c, s, s', Nothing);
+          NormalizedStatePreservedStatement(d, While(e, c), s', s'', r);
+        }
+      }
+
+    case Var(_, _)             =>
+    case Assign(_, _)          =>
+    case Return(_)             =>
+    case Call(_, id, _)        =>
+
+}
 
 inductive lemma PreservationBigStepExpr(d: TopLevel,  delta: Delta,
                                         s: State,     gamma: Gamma,
