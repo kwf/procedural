@@ -658,13 +658,12 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
   }
 }
 
-// TODO: This ought to verify, but doesn't, strangely. Bug?
 inductive lemma ArgumentsAreValues(d: TopLevel, s: State, es: List<Expr>, vs: List<Expr>)
   decreases es
   requires NormalizedState(s)
   requires Length(es) == Length(vs)
-  requires (forall evaluation :: evaluation in Elements(Zip(es, vs)) ==> var (e, v) := evaluation; EvalExpr(d, s, e, v))
-  ensures forall v :: v in Elements(vs) ==> Value(v)
+  requires forall evaluation :: evaluation in Elements(Zip(es, vs)) ==> var (e, v) := evaluation; EvalExpr(d, s, e, v)
+  ensures Elements(Zip(es, vs)) != {} ==> forall v :: v in Elements(vs) ==> Value(v)
 {
   if !vs.Nil? {
     assert Elements(Zip(es.Tail, vs.Tail)) <= Elements(Zip(es, vs));
@@ -677,7 +676,6 @@ inductive lemma ArgumentsAreValues(d: TopLevel, s: State, es: List<Expr>, vs: Li
     assert Elements(vs) == {vs.Head} + Elements(vs.Tail);
     assert forall v :: v in {vs.Head} + Elements(vs.Tail) ==> Value(v);
     assert forall v :: v in Elements(vs) ==> Value(v);
-  } else {
   }
 }
 
