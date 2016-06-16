@@ -416,6 +416,9 @@ predicate method TypeDecl(delta: Delta, declaration: Decl) {
 
 // BIG STEP SEMANTICS
 
+// TODO: Refactor so that body of complex constraints (e.g. if, while) are separate
+// predicates, so that we can refer to them more modularly in proofs.
+
 type State = map<Id, Expr>
 
 predicate TypeState(delta: Delta, gamma: Gamma, s: State) {
@@ -508,7 +511,9 @@ predicate MathOpDenotes(op: MathOp, v1: int, v2: int, result: int) {
     case Mod       => if v2 != 0 then result == v1 % v2 else true  // division by zero is undefined
 }
 
-inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, result: Expr) {
+inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, result: Expr)
+  requires NormalizedState(s)
+{
   match e
     case Unit =>
       result == Expr.Unit
@@ -547,13 +552,19 @@ inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr)
   p in d &&
   var (params, body) := d[p];
   Length(params) == Length(args) &&
+  (forall a :: a in Elements(args) ==> Value(a)) &&
   var s := MapFromList(Zip(params, args));
-  exists s' ::
+  NormalFormNewState(params, args);
+  assert NormalizedState(s);
+  exists s' | NormalizedState(s') ::
      EvalBlock(d, body, s, s', Just(result)) ||                  // normal return
     (EvalBlock(d, body, s, s', Nothing) && result == Expr.Unit)  // auto-unit return
 }
 
-inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>) {
+inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>)
+  requires NormalizedState(s)
+  requires NormalizedState(s'')
+{
   match c
     case Var(_, _) =>
       result.Nothing? &&
@@ -576,10 +587,10 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
         if !b
           then s == s'' && result == Nothing
           else
-            exists s' ::
-              (EvalBlock(d, c, s, s', Nothing) &&
-               EvalStatement(d, While(e, c), s', s'', result)) ||  // no return from this iteration
-              (result.Just? && EvalBlock(d, c, s, s', result))                     // or return right here, right now
+            exists r, s' | NormalizedState(s') && EvalBlock(d, c, s, s', r) ::
+              if r.Just?
+                 then r == result && s' == s''
+                 else EvalStatement(d, While(e, c), s', s'', result)
     case Return(e) =>
       exists v ::
       EvalExpr(d, s, e, v) &&
@@ -611,21 +622,25 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
         Length(vs) == Length(es) &&
         (forall evaluation ::
           evaluation in Elements(Zip(es, vs)) ==>
-            var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
+          var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
         EvalCall(d, p, vs, r) &&
         if maybeId.Just? then var id := maybeId.FromJust;
-          s'' == s[id := r]
-        else s == s''
+           s'' == s[id := r]
+           else s == s''
 }
 
-inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, result: Maybe<Expr>) {
+inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, result: Maybe<Expr>)
+  requires NormalizedState(s)
+  requires NormalizedState(s'')
+{
   match cs
     case Nil =>
       result.Nothing? && s == s''
     case Cons(c, cs') =>
-      (result.Just? && EvalStatement(d, c, s, s'', result)) ||  // we returned early here
-      (exists s' :: EvalStatement(d, c, s, s', Nothing) &&      // or we didn't return early here
-                    EvalBlock(d, cs', s', s'', result))         // and we continue executing
+      exists r, s' | NormalizedState(s') && EvalStatement(d, c, s, s', r) ::
+        if r.Just?
+          then r == result && s' == s''
+          else EvalBlock(d, cs', s', s'', result)
 }
 
 inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
@@ -645,15 +660,18 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
                   (forall evaluation ::
                     evaluation in Elements(Zip(es, vs)) ==>
                     var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
-                    EvalCall(d, p, vs, r);
+                    EvalCall#[_k - 1](d, p, vs, r);
         ArgumentsAreValues(d, s, es, vs);
         NormalFormNewState(params, vs);
         var s0 := MapFromList(Zip(params, vs));
         assert NormalizedState(s0);
-        var s' :| EvalBlock(d, body, s0, s', Just(r)) ||
-                 (EvalBlock(d, body, s0, s', Nothing) && r == Expr.Unit);
-        if EvalBlock(d, body, s0, s', Just(r)) {
-          NormalFormBigStepBlockReturn(d, body, s0, s', r);
+        var s' :| NormalizedState(s') &&
+                 (EvalBlock#[_k - 2](d, body, s0, s', Just(r)) ||
+                 (EvalBlock#[_k - 2](d, body, s0, s', Nothing) && r == Expr.Unit));
+        if EvalBlock#[_k - 2](d, body, s0, s', Just(r)) {
+          NormalFormBigStepBlockReturn#[_k - 2](d, body, s0, s', r);
+        } else {
+          assert r.Unit?;
         }
   }
 }
@@ -690,93 +708,54 @@ lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
       NormalFormNewState(params.Tail, vs.Tail);
 }
 
-// inductive lemma DeterministicReturn(d: TopLevel, cs: Block, s: State, s': State, r: Maybe<Expr>, r': Maybe<Expr>)
-//   requires EvalBlock(d, cs, s, s', r)
-//   requires EvalBlock(d, cs, s, s', r')
-//   ensures  r.Just? <==> r'.Just?
-// {
-// }
-
 inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s'': State, r: Expr)
   requires NormalizedState(s)
+  requires NormalizedState(s'')
   requires EvalBlock(d, cs, s, s'', Just(r))
   ensures  Value(r)
 {
   match cs
     case Nil =>
     case Cons(c, cs') =>
-      if EvalStatement(d, c, s, s'', Just(r)) {
+      if EvalStatement#[_k - 1](d, c, s, s'', Just(r)) {
         NormalFormBigStepStatementReturn(d, c, s, s'', r);
       } else {
-        var s' :| EvalStatement(d, c, s, s', Nothing) && EvalBlock(d, cs', s', s'', Just(r));
+        var s' :| NormalizedState(s') &&
+                  EvalStatement#[_k - 1](d, c, s, s', Nothing) &&
+                  EvalBlock#[_k - 1](d, cs', s', s'', Just(r));
         NormalFormBigStepBlockReturn(d, cs', s', s'', r);
       }
-      //(exists s' :: EvalStatement(d, c, s, s', Nothing) &&      // or we didn't return early here
-      //              EvalBlock(d, cs', s', s'', result))         // and we continue executing
 }
 
 inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: State, s'': State, r: Expr)
   requires NormalizedState(s)
+  requires NormalizedState(s'')
   requires EvalStatement(d, c, s, s'', Just(r))
   ensures  Value(r)
-/*{
-}*/
-
-// TODO: Normalized state preserved by statements / blocks
-
-inductive lemma NormalizedStatePreservedBlock(d: TopLevel, cs: Block, s: State, s': State, r: Maybe<Expr>)
-  requires NormalizedState(s)
-  requires EvalBlock(d, cs, s, s', r)
-  ensures  NormalizedState(s')
 {
-}
-
-inductive lemma NormalizedStatePreservedStatement(d: TopLevel, c: Statement, s: State, s'': State, r: Maybe<Expr>)
-  requires NormalizedState(s)
-  requires EvalStatement(d, c, s, s'', r)
-  ensures  NormalizedState(s'')
-{
-  match c
-    case Print(_, _)           =>
-    case Read(_, _)            =>
-    case IfThenElse(e1, c1, c2) =>
-      var v1, b1 :| EvalExpr(d, s, e1, v1) &&
-                    IsBool(b1, v1) &&
-                    if b1 then EvalBlock(d, c1, s, s'', r)
-                          else EvalBlock(d, c2, s, s'', r);
-      if b1 {
-        NormalizedStatePreservedBlock(d, c1, s, s'', r);
-      } else {
-        NormalizedStatePreservedBlock(d, c2, s, s'', r);
-      }
-    case While(e, c)           =>
-      var v, b :| EvalExpr(d, s, e, v) &&
-                  IsBool(b, v) &&
-                  if !b
-                     then s == s'' && r == Nothing
-                     else
-                       exists s' ::
-                       (EvalBlock(d, c, s, s', Nothing) &&
-                        EvalStatement(d, While(e, c), s', s'', r)) ||
-                       (r.Just? && EvalBlock(d, c, s, s', r));
-      if b {
-        var s' :| (EvalBlock(d, c, s, s', Nothing) &&
-                   EvalStatement(d, While(e, c), s', s'', r)) ||
-                  (r.Just? && EvalBlock(d, c, s, s', r));
-        if EvalBlock(d, c, s, s', r) && r.Just? {
-          NormalizedStatePreservedBlock(d, c, s, s', r);
-          assume s' == s''; // need to prove this: is it true?
+  if !c.Var? && !c.Assign? && !c.Read? && !c.Print? && !c.Call? {
+    match c
+      case Return(e) =>
+        assert EvalExpr(d, s, e, r);
+        NormalFormBigStepExpr(d, s, e, r);
+      case IfThenElse(e, c1, c2) =>
+        var v, b :| EvalExpr(d, s, e, v) &&
+                    IsBool(b, v) &&
+                    if b then EvalBlock#[_k - 1](d, c1, s, s'', Just(r))
+                         else EvalBlock#[_k - 1](d, c2, s, s'', Just(r));
+        if b {
+          NormalFormBigStepBlockReturn(d, c1, s, s'', r);
         } else {
-          NormalizedStatePreservedBlock(d, c, s, s', Nothing);
-          NormalizedStatePreservedStatement(d, While(e, c), s', s'', r);
+          NormalFormBigStepBlockReturn(d, c2, s, s'', r);
         }
-      }
-
-    case Var(_, _)             =>
-    case Assign(_, _)          =>
-    case Return(_)             =>
-    case Call(_, id, _)        =>
-
+      case While(e, c) =>
+        var v :| EvalExpr(d, s, e, True) &&
+        exists r, s' | NormalizedState(s') && EvalBlock(d, c, s, s', r) ::
+                       if r.Just?
+                         then r == result && s' == s''
+                       else EvalStatement(d, While(e, c), s', s'', result);
+        // TODO: FINISH THIS
+  }
 }
 
 inductive lemma PreservationBigStepExpr(d: TopLevel,  delta: Delta,
