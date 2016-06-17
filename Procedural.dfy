@@ -662,7 +662,6 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
         ArgumentsAreValues(d, s, es, vs);
         NormalFormNewState(params, vs);
         var s0 := MapFromList(Zip(params, vs));
-        assert NormalizedState(s0);
         var s' :| NormalizedState(s') &&
                  (EvalBlock#[_k - 2](d, body, s0, s', Just(r)) ||
                  (EvalBlock#[_k - 2](d, body, s0, s', Nothing) && r == Expr.Unit));
@@ -681,15 +680,9 @@ inductive lemma ArgumentsAreValues(d: TopLevel, s: State, es: List<Expr>, vs: Li
 {
   if !vs.Nil? {
     assert Elements(Zip(es.Tail, vs.Tail)) <= Elements(Zip(es, vs));
-    // assert EvalExpr#[_k](d, s, es.Head, vs.Head);
     AllSmallerThanList(es);
     NormalFormBigStepExpr#[_k](d, s, es.Head, vs.Head);
     ArgumentsAreValues#[_k](d, s, es.Tail, vs.Tail);
-    // assert Value(vs.Head);
-    // assert forall v :: v in Elements(vs.Tail) ==> Value(v);
-    // assert Elements(vs) == {vs.Head} + Elements(vs.Tail);
-    // assert forall v :: v in {vs.Head} + Elements(vs.Tail) ==> Value(v);
-    // assert forall v :: v in Elements(vs) ==> Value(v);
   }
 }
 
@@ -698,10 +691,9 @@ lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
   requires forall v :: v in Elements(vs) ==> Value(v)
   ensures NormalizedState(MapFromList(Zip(params, vs)))
 {
-  match vs
-    case Nil =>
-    case Cons(_, _) =>
-      NormalFormNewState(params.Tail, vs.Tail);
+  if !vs.Nil? {
+    NormalFormNewState(params.Tail, vs.Tail);
+  }
 }
 
 inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s'': State, r: Expr)
@@ -735,10 +727,11 @@ inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: S
         assert EvalExpr(d, s, e, r);
         NormalFormBigStepExpr(d, s, e, r);
       case IfThenElse(e, c1, c2) =>
-        var v, b :| EvalExpr(d, s, e, v) &&
-                    IsBool(b, v) &&
-                    if b then EvalBlock(d, c1, s, s'', Just(r))
-                         else EvalBlock(d, c2, s, s'', Just(r));
+        var b :| exists v ::
+                   EvalExpr(d, s, e, v) &&
+                   IsBool(b, v) &&
+                   if b then EvalBlock(d, c1, s, s'', Just(r))
+                        else EvalBlock(d, c2, s, s'', Just(r));
         if b {
           NormalFormBigStepBlockReturn(d, c1, s, s'', r);
         } else {
