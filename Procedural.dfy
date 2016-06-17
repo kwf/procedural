@@ -685,15 +685,15 @@ inductive lemma ArgumentsAreValues(d: TopLevel, s: State, es: List<Expr>, vs: Li
 {
   if !vs.Nil? {
     assert Elements(Zip(es.Tail, vs.Tail)) <= Elements(Zip(es, vs));
-    assert EvalExpr#[_k](d, s, es.Head, vs.Head);
+    // assert EvalExpr#[_k](d, s, es.Head, vs.Head);
     AllSmallerThanList(es);
     NormalFormBigStepExpr#[_k](d, s, es.Head, vs.Head);
     ArgumentsAreValues#[_k](d, s, es.Tail, vs.Tail);
-    assert Value(vs.Head);
-    assert forall v :: v in Elements(vs.Tail) ==> Value(v);
-    assert Elements(vs) == {vs.Head} + Elements(vs.Tail);
-    assert forall v :: v in {vs.Head} + Elements(vs.Tail) ==> Value(v);
-    assert forall v :: v in Elements(vs) ==> Value(v);
+    // assert Value(vs.Head);
+    // assert forall v :: v in Elements(vs.Tail) ==> Value(v);
+    // assert Elements(vs) == {vs.Head} + Elements(vs.Tail);
+    // assert forall v :: v in {vs.Head} + Elements(vs.Tail) ==> Value(v);
+    // assert forall v :: v in Elements(vs) ==> Value(v);
   }
 }
 
@@ -749,12 +749,16 @@ inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: S
           NormalFormBigStepBlockReturn(d, c2, s, s'', r);
         }
       case While(e, c) =>
-        var v :| EvalExpr(d, s, e, True) &&
-        exists r, s' | NormalizedState(s') && EvalBlock(d, c, s, s', r) ::
-                       if r.Just?
-                         then r == result && s' == s''
-                       else EvalStatement(d, While(e, c), s', s'', result);
-        // TODO: FINISH THIS
+        var r', s' :| NormalizedState(s') &&
+                      EvalBlock#[_k - 1](d, c, s, s', r') &&
+                        if r'.Just?
+                          then Just(r) == r' && s' == s''
+                          else EvalStatement(d, While(e, c), s', s'', Just(r));
+        if r'.Just? {
+          NormalFormBigStepBlockReturn(d, c, s, s', r);
+        } else {
+          NormalFormBigStepStatementReturn(d, While(e, c), s', s'', r);
+        }
   }
 }
 
