@@ -649,11 +649,8 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
   requires EvalExpr(d, s, e, r)
   ensures  Value(r)
 {
-  if !Value(e) && !e.Id? {
+  if e.Call? {
     match e
-      case Not(e') =>
-      case Apply(e1, op, e2) =>
-      case IfThenElse(e1, e2, e3) =>
       case Call(p, es) =>
         // TODO: Refactor this out into a separate NormalFormBigStepCall(...)
         var (params, body) := d[p];
@@ -661,7 +658,7 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
                   (forall evaluation ::
                     evaluation in Elements(Zip(es, vs)) ==>
                     var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
-                    EvalCall#[_k - 1](d, p, vs, r);
+                    EvalCall(d, p, vs, r);
         ArgumentsAreValues(d, s, es, vs);
         NormalFormNewState(params, vs);
         var s0 := MapFromList(Zip(params, vs));
@@ -671,8 +668,6 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
                  (EvalBlock#[_k - 2](d, body, s0, s', Nothing) && r == Expr.Unit));
         if EvalBlock#[_k - 2](d, body, s0, s', Just(r)) {
           NormalFormBigStepBlockReturn#[_k - 2](d, body, s0, s', r);
-        } else {
-          assert r.Unit?;
         }
   }
 }
@@ -718,12 +713,12 @@ inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s
   match cs
     case Nil =>
     case Cons(c, cs') =>
-      if EvalStatement#[_k - 1](d, c, s, s'', Just(r)) {
+      if EvalStatement(d, c, s, s'', Just(r)) {
         NormalFormBigStepStatementReturn(d, c, s, s'', r);
       } else {
         var s' :| NormalizedState(s') &&
-                  EvalStatement#[_k - 1](d, c, s, s', Nothing) &&
-                  EvalBlock#[_k - 1](d, cs', s', s'', Just(r));
+                  EvalStatement(d, c, s, s', Nothing) &&
+                  EvalBlock(d, cs', s', s'', Just(r));
         NormalFormBigStepBlockReturn(d, cs', s', s'', r);
       }
 }
@@ -742,8 +737,8 @@ inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: S
       case IfThenElse(e, c1, c2) =>
         var v, b :| EvalExpr(d, s, e, v) &&
                     IsBool(b, v) &&
-                    if b then EvalBlock#[_k - 1](d, c1, s, s'', Just(r))
-                         else EvalBlock#[_k - 1](d, c2, s, s'', Just(r));
+                    if b then EvalBlock(d, c1, s, s'', Just(r))
+                         else EvalBlock(d, c2, s, s'', Just(r));
         if b {
           NormalFormBigStepBlockReturn(d, c1, s, s'', r);
         } else {
@@ -751,7 +746,7 @@ inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: S
         }
       case While(e, c) =>
         var r', s' :| NormalizedState(s') &&
-                      EvalBlock#[_k - 1](d, c, s, s', r') &&
+                      EvalBlock(d, c, s, s', r') &&
                         if r'.Just?
                           then Just(r) == r' && s' == s''
                           else EvalStatement(d, While(e, c), s', s'', Just(r));
