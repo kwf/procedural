@@ -655,6 +655,7 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
       case Apply(e1, op, e2) =>
       case IfThenElse(e1, e2, e3) =>
       case Call(p, es) =>
+        // TODO: Refactor this out into a separate NormalFormBigStepCall(...)
         var (params, body) := d[p];
         var vs :| Length(es) == Length(vs) &&
                   (forall evaluation ::
