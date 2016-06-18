@@ -59,7 +59,8 @@ predicate method NoDuplicates<A(==)>(xs: List<A>) {
   |Elements(xs)| == Length(xs)
 }
 
-function method ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C>
+function method {:fuel (Length<A>), 3} {:fuel (Length<B>), 3}
+ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C>
   requires forall x, y :: f.reads(x, y) == {}
   requires forall x, y :: x in Elements(xs) && y in Elements(ys) ==> f.requires(x, y)
   requires Length(xs) == Length(ys)
@@ -68,9 +69,6 @@ function method ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C
   match (xs, ys)
     case (Nil, Nil) => Nil
     case (Cons(x, xs'), Cons(y, ys')) => Cons(f(x, y), ZipWith(f, xs', ys'))
-    // proving that mismatched lists are impossible
-    case (Cons(x, xs'), Nil) => assert (Length(Cons(x, xs')) != Length<A>(Nil)); Absurd()
-    case (Nil, Cons(y, ys')) => assert (Length(Cons(y, ys')) != Length<B>(Nil)); Absurd()
 }
 
 function method Zip<A,B>(xs: List<A>, ys: List<B>): List<(A,B)>
