@@ -425,7 +425,7 @@ predicate TypeState(delta: Delta, gamma: Gamma, s: State) {
           TypeExpr(delta, gamma, s[id], gamma[id])
 }
 
-predicate NormalizedState(s: State) {
+predicate ValidState(s: State) {
   forall id :: id in s ==> Value(s[id])
 }
 
@@ -444,13 +444,6 @@ predicate TypeTopLevel(delta: Delta, d: TopLevel) {
 
 predicate method Value(e: Expr) {
   e.Unit? || e.False? || e.True? || e.Literal?
-}
-
-predicate NotDenotes(e1: Expr, e2: Expr) {
-  exists b1, b2 ::
-    IsBool(b1, e1) &&
-    IsBool(b2, e2) &&
-    b1 == !b2
 }
 
 predicate ApplyDenotes(op: Op, e1: Expr, e2: Expr, result: Expr) {
@@ -502,48 +495,52 @@ predicate RelOpDenotes(op: RelOp, v1: int, v2: int, result: bool) {
 
 predicate MathOpDenotes(op: MathOp, v1: int, v2: int, result: int) {
   match op
-    case Plus      => result == v1 + v2
-    case Times     => result == v1 * v2
-    case Minus     => result == v1 - v2
-    case DividedBy => if v2 != 0 then result == v1 / v2 else true  // division by zero is undefined
-    case Mod       => if v2 != 0 then result == v1 % v2 else true  // division by zero is undefined
+    case Plus      =>           result == v1 + v2
+    case Times     =>           result == v1 * v2
+    case Minus     =>           result == v1 - v2
+    case DividedBy => v2 != 0 ==> result == v1 / v2  // division by zero is undefined
+    case Mod       => v2 != 0 ==> result == v1 % v2  // division by zero is undefined
 }
 
-inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, result: Expr)
-  requires NormalizedState(s)
+inductive predicate EvalExpr(d: TopLevel, s: State, e: Expr, r: Expr)
+  requires ValidState(s)
 {
-  match e
-    case Unit =>
-      result == Expr.Unit
-    case True =>
-      result == True
-    case False =>
-      result == False
-    case Literal(l) =>
-      result == Literal(l)
+  if e.Unit? || e.True? || e.False? || e.Literal? then r == e
+  else match e
     case Id(id) =>
-      id in s && result == s[id]
+      id in s && r == s[id]
     case Not(e') =>
-      exists r ::
-        EvalExpr(d, s, e', r) &&
-        NotDenotes(result, r)
+      exists b ::
+        EvalBool(d, s, e', b) &&
+        r == if b then False else True
     case Apply(e1, op, e2) =>
       exists v1, v2 ::
         EvalExpr(d, s, e1, v1) &&
         EvalExpr(d, s, e2, v2) &&
-        ApplyDenotes(op, v1, v2, result)
+        ApplyDenotes(op, v1, v2, r)
     case IfThenElse(e1, e2, e3) =>
-      exists b, b' :: EvalExpr(d, s, e1, b) &&
-        IsBool(b', b) &&
-        if b' then EvalExpr(d, s, e2, result)
-              else EvalExpr(d, s, e3, result)
+      exists b :: EvalBool(d, s, e1, b) &&
+        if b then EvalExpr(d, s, e2, r)
+             else EvalExpr(d, s, e3, r)
     case Call(p, es) =>
       exists vs ::
-        Length(vs) == Length(es) &&
-        (forall evaluation ::
-          evaluation in Elements(Zip(es, vs)) ==>
-            var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
-        EvalCall(d, p, vs, result)
+        EvalList(d, s, es, vs) &&
+        EvalCall(d, p, vs, r)
+}
+
+inductive predicate EvalList(d: TopLevel, s: State, es: List<Expr>, rs: List<Expr>)
+  requires ValidState(s)
+{
+  Length(es) == Length(rs) &&
+  forall evaluation ::
+    evaluation in Elements(Zip(es, rs)) ==>
+      var (e, r) := evaluation; EvalExpr(d, s, e, r)
+}
+
+inductive predicate EvalBool(d: TopLevel, s: State, e: Expr, b: bool)
+  requires ValidState(s)
+{
+  exists v :: EvalExpr(d, s, e, v) && IsBool(b, v)
 }
 
 inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr) {
@@ -553,15 +550,15 @@ inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr)
   (forall a :: a in Elements(args) ==> Value(a)) &&
   var s := MapFromList(Zip(params, args));
   NormalFormNewState(params, args);
-  assert NormalizedState(s);
-  exists s' | NormalizedState(s') ::
+  assert ValidState(s);
+  exists s' | ValidState(s') ::
      EvalBlock(d, body, s, s', Just(result)) ||                  // normal return
     (EvalBlock(d, body, s, s', Nothing) && result == Expr.Unit)  // auto-unit return
 }
 
 inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>)
-  requires NormalizedState(s)
-  requires NormalizedState(s'')
+  requires ValidState(s)
+  requires ValidState(s'')
 {
   match c
     case Var(_, _) =>
@@ -573,22 +570,13 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
         EvalExpr(d, s, e, v) &&
         s'' == s[id := v]
     case IfThenElse(e1, c2, c3) =>
-      exists v1, b1 ::
-        EvalExpr(d, s, e1, v1) &&
-        IsBool(b1, v1) &&
-        if b1 then EvalBlock(d, c2, s, s'', result)
-              else EvalBlock(d, c3, s, s'', result)
+      exists b :: EvalIfStatement(d, e1, c2, c3, s, s'', result, b)
     case While(e, c) =>
-      exists v, b ::
-        EvalExpr(d, s, e, v) &&
-        IsBool(b, v) &&
+      exists b :: EvalBool(d, s, e, b) &&
         if !b
           then s == s'' && result == Nothing
-          else
-            exists r, s' | NormalizedState(s') && EvalBlock(d, c, s, s', r) ::
-              if r.Just?
-                 then r == result && s' == s''
-                 else EvalStatement(d, While(e, c), s', s'', result)
+          else exists s', broken ::
+            EvalWhileLoop(d, e, c, s, s', s'', result, broken)
     case Return(e) =>
       exists v ::
       EvalExpr(d, s, e, v) &&
@@ -596,46 +584,67 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
       s == s''
     case Read(maybeId, t) =>
       result.Nothing? &&
-      if maybeId.Just? then var id := maybeId.FromJust;
-        if t.Unit? then s'' == s[id := Expr.Unit] else
-        if t.Bool? then s'' == s[id := True] || s'' == s[id := False] else
-        if t.Int?  then
-          id in s'' && s''[id].Literal? &&  // in new state, the id is an int literal
-          (forall k :: (k  in s ==> k in s'')) &&  // new state has domain >= old state
-          forall k :: (k  in s && k != id ==> s[k] == s''[k]) &&  // all keys != id are preserved in new state
-                 (k !in s && k != id ==> k !in s'')  // no new keys (except maybe id) are introduced
-        else false
+      if maybeId.Just? then
+        var id := maybeId.FromJust;
+        Havoc(id, t, s, s'')
       else s == s''
     case Print(_, es) =>
       result.Nothing? &&
       s == s'' &&
-      exists vs ::
-        Length(vs) == Length(es) &&
-        (forall evaluation ::
-          evaluation in Elements(Zip(es, vs)) ==>
-            var (e, v) := evaluation; EvalExpr(d, s, e, v))
+      exists vs :: EvalList(d, s, es, vs)
     case Call(maybeId, p, es) =>
       result.Nothing? &&
       exists vs, r ::
-        Length(vs) == Length(es) &&
-        (forall evaluation ::
-          evaluation in Elements(Zip(es, vs)) ==>
-          var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
+        EvalList(d, s, es, vs) &&
         EvalCall(d, p, vs, r) &&
         if maybeId.Just? then var id := maybeId.FromJust;
            s'' == s[id := r]
            else s == s''
 }
 
+inductive predicate EvalIfStatement(d: TopLevel, e: Expr, c1: Block, c2: Block, s: State, s': State, r: Maybe<Expr>, b: bool)
+  requires ValidState(s)
+  requires ValidState(s')
+{
+  EvalBool(d, s, e, b) &&
+    if b then EvalBlock(d, c1, s, s', r)
+         else EvalBlock(d, c2, s, s', r)
+}
+
+inductive predicate EvalWhileLoop(d: TopLevel, e: Expr, c: Block, s: State, s': State, s'': State, r: Maybe<Expr>, broken: bool)
+  requires ValidState(s)
+  requires ValidState(s'')
+{
+  ValidState(s') &&
+    exists r' :: EvalBlock(d, c, s, s', r') &&
+    if r'.Just?
+      then r == r' && s' == s'' && broken == true
+      else EvalStatement(d, While(e, c), s', s'', r) && broken == false
+}
+
+inductive predicate Havoc(id: Id, t: Type, s: State, s': State)
+  requires ValidState(s)
+  requires ValidState(s')
+{
+  match t
+    case Unit => s' == s[id := Expr.Unit]
+    case Bool => s' == s[id := True] || s' == s[id := False]
+    case Int =>
+      id in s' && s'[id].Literal? &&  // in new state, the id is an int literal
+      (forall k :: (k in s ==> k in s')) &&  // new state has domain >= old state
+      forall k :: (k in s && k != id ==> s[k] == s'[k]) &&  // all keys != id are preserved in new state
+      (k !in s && k != id ==> k !in s')  // no new keys (except maybe id) are introduced
+}
+
 inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, result: Maybe<Expr>)
-  requires NormalizedState(s)
-  requires NormalizedState(s'')
+  requires ValidState(s)
+  requires ValidState(s'')
 {
   match cs
     case Nil =>
       result.Nothing? && s == s''
     case Cons(c, cs') =>
-      exists r, s' | NormalizedState(s') && EvalStatement(d, c, s, s', r) ::
+      exists r, s' | ValidState(s') && EvalStatement(d, c, s, s', r) ::
         if r.Just?
           then r == result && s' == s''
           else EvalBlock(d, cs', s', s'', result)
@@ -643,51 +652,43 @@ inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, resu
 
 inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
   decreases e
-  requires NormalizedState(s)
+  requires ValidState(s)
   requires EvalExpr(d, s, e, r)
   ensures  Value(r)
 {
   if e.Call? {
     match e
       case Call(p, es) =>
-        // TODO: Refactor this out into a separate NormalFormBigStepCall(...)
-        var (params, body) := d[p];
-        var vs :| Length(es) == Length(vs) &&
-                  (forall evaluation ::
-                    evaluation in Elements(Zip(es, vs)) ==>
-                    var (e, v) := evaluation; EvalExpr(d, s, e, v)) &&
-                    EvalCall(d, p, vs, r);
-        ArgumentsAreValues(d, s, es, vs);
-        NormalFormNewState(params, vs);
-        var s0 := MapFromList(Zip(params, vs));
-        var s' :| NormalizedState(s') &&
-                 (EvalBlock#[_k - 2](d, body, s0, s', Just(r)) ||
-                 (EvalBlock#[_k - 2](d, body, s0, s', Nothing) && r == Expr.Unit));
-        if EvalBlock#[_k - 2](d, body, s0, s', Just(r)) {
-          NormalFormBigStepBlockReturn#[_k - 2](d, body, s0, s', r);
-        }
+        var vs :| EvalList(d, s, es, vs) &&
+                  EvalCall(d, p, vs, r);
+        NormalFormBigStepCall(d, p, vs, r);
   }
 }
 
-inductive lemma ArgumentsAreValues(d: TopLevel, s: State, es: List<Expr>, vs: List<Expr>)
-  decreases es
-  requires NormalizedState(s)
-  requires Length(es) == Length(vs)
-  requires forall evaluation :: evaluation in Elements(Zip(es, vs)) ==> var (e, v) := evaluation; EvalExpr(d, s, e, v)
-  ensures Elements(Zip(es, vs)) != {} ==> forall v :: v in Elements(vs) ==> Value(v)
+inductive lemma NormalFormBigStepCall(d: TopLevel, p: Id, vs: List<Expr>, r: Expr)
+  requires EvalCall(d, p, vs, r)
+  ensures  Value(r)
 {
-  if !vs.Nil? {
-    assert Elements(Zip(es.Tail, vs.Tail)) <= Elements(Zip(es, vs));
-    AllSmallerThanList(es);
-    NormalFormBigStepExpr#[_k](d, s, es.Head, vs.Head);
-    ArgumentsAreValues#[_k](d, s, es.Tail, vs.Tail);
+  var (params, body) := d[p];
+  var s0 := NewState(params, vs);
+  if s' :| ValidState(s') && EvalBlock(d, body, s0, s', Just(r)) {
+    NormalFormBigStepBlockReturn(d, body, s0, s', r);
   }
+}
+
+function NewState(params: List<Id>, vs: List<Expr>): map<Id, Expr>
+  requires Length(vs) == Length(params)
+  requires forall v :: v in Elements(vs) ==> Value(v)
+  ensures ValidState(NewState(params, vs))
+{
+  NormalFormNewState(params, vs);
+  MapFromList(Zip(params, vs))
 }
 
 lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
   requires Length(vs) == Length(params)
   requires forall v :: v in Elements(vs) ==> Value(v)
-  ensures NormalizedState(MapFromList(Zip(params, vs)))
+  ensures ValidState(MapFromList(Zip(params, vs)))
 {
   if !vs.Nil? {
     NormalFormNewState(params.Tail, vs.Tail);
@@ -695,8 +696,8 @@ lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
 }
 
 inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s'': State, r: Expr)
-  requires NormalizedState(s)
-  requires NormalizedState(s'')
+  requires ValidState(s)
+  requires ValidState(s'')
   requires EvalBlock(d, cs, s, s'', Just(r))
   ensures  Value(r)
 {
@@ -706,7 +707,7 @@ inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s
       if EvalStatement(d, c, s, s'', Just(r)) {
         NormalFormBigStepStatementReturn(d, c, s, s'', r);
       } else {
-        var s' :| NormalizedState(s') &&
+        var s' :| ValidState(s') &&
                   EvalStatement(d, c, s, s', Nothing) &&
                   EvalBlock(d, cs', s', s'', Just(r));
         NormalFormBigStepBlockReturn(d, cs', s', s'', r);
@@ -714,37 +715,28 @@ inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s
 }
 
 inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: State, s'': State, r: Expr)
-  requires NormalizedState(s)
-  requires NormalizedState(s'')
+  requires ValidState(s)
+  requires ValidState(s'')
   requires EvalStatement(d, c, s, s'', Just(r))
   ensures  Value(r)
 {
-  if !c.Var? && !c.Assign? && !c.Read? && !c.Print? && !c.Call? {
+  if c.Return? || c.IfThenElse? || c.While? {
     match c
       case Return(e) =>
-        assert EvalExpr(d, s, e, r);
         NormalFormBigStepExpr(d, s, e, r);
       case IfThenElse(e, c1, c2) =>
-        var b :| exists v ::
-                   EvalExpr(d, s, e, v) &&
-                   IsBool(b, v) &&
-                   if b then EvalBlock(d, c1, s, s'', Just(r))
-                        else EvalBlock(d, c2, s, s'', Just(r));
+        var b :| EvalIfStatement(d, e, c1, c2, s, s'', Just(r), b);
         if b {
-          NormalFormBigStepBlockReturn(d, c1, s, s'', r);
+          NormalFormBigStepBlockReturn#[_k - 2](d, c1, s, s'', r);
         } else {
-          NormalFormBigStepBlockReturn(d, c2, s, s'', r);
+          NormalFormBigStepBlockReturn#[_k - 2](d, c2, s, s'', r);
         }
       case While(e, c) =>
-        var r', s' :| NormalizedState(s') &&
-                      EvalBlock(d, c, s, s', r') &&
-                        if r'.Just?
-                          then Just(r) == r' && s' == s''
-                          else EvalStatement(d, While(e, c), s', s'', Just(r));
-        if r'.Just? {
-          NormalFormBigStepBlockReturn(d, c, s, s', r);
+        var s', broken :| EvalWhileLoop(d, e, c, s, s', s'', Just(r), broken);
+        if broken {
+          NormalFormBigStepBlockReturn#[_k - 2](d, c, s, s', r);
         } else {
-          NormalFormBigStepStatementReturn(d, While(e, c), s', s'', r);
+          NormalFormBigStepStatementReturn#[_k - 2](d, While(e, c), s', s'', r);
         }
   }
 }
@@ -755,8 +747,7 @@ inductive lemma PreservationBigStepExpr(d: TopLevel,  delta: Delta,
                                         r: Expr)
   requires TypeTopLevel(delta, d)        // top level is well-typed
   requires TypeState(delta, gamma, s)    // environment is well-typed
-  requires NormalizedState(s)            // environment contains only values
+  requires ValidState(s)            // environment contains only values
   requires TypeExpr(delta, gamma, e, t)  // e has type t
   requires EvalExpr(d, s, e, r)          // e evaluates to r
   ensures  TypeExpr(delta, gamma, r, t)  // ... then r also will have type t
-
