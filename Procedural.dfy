@@ -548,12 +548,29 @@ inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr)
   var (params, body) := d[p];
   Length(params) == Length(args) &&
   (forall a :: a in Elements(args) ==> Value(a)) &&
-  var s := MapFromList(Zip(params, args));
-  NormalFormNewState(params, args);
-  assert ValidState(s);
+  var s := NewState(params, args);
   exists s' | ValidState(s') ::
      EvalBlock(d, body, s, s', Just(result)) ||                  // normal return
     (EvalBlock(d, body, s, s', Nothing) && result == Expr.Unit)  // auto-unit return
+}
+
+function NewState(params: List<Id>, vs: List<Expr>): map<Id, Expr>
+  requires Length(vs) == Length(params)
+  requires forall v :: v in Elements(vs) ==> Value(v)
+  ensures ValidState(NewState(params, vs))
+{
+  NormalFormNewState(params, vs);
+  MapFromList(Zip(params, vs))
+}
+
+lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
+  requires Length(vs) == Length(params)
+  requires forall v :: v in Elements(vs) ==> Value(v)
+  ensures ValidState(MapFromList(Zip(params, vs)))
+{
+  if !vs.Nil? {
+    NormalFormNewState(params.Tail, vs.Tail);
+  }
 }
 
 inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>)
@@ -673,25 +690,6 @@ inductive lemma NormalFormBigStepCall(d: TopLevel, p: Id, vs: List<Expr>, r: Exp
   var s0 := NewState(params, vs);
   if s' :| ValidState(s') && EvalBlock(d, body, s0, s', Just(r)) {
     NormalFormBigStepBlockReturn(d, body, s0, s', r);
-  }
-}
-
-function NewState(params: List<Id>, vs: List<Expr>): map<Id, Expr>
-  requires Length(vs) == Length(params)
-  requires forall v :: v in Elements(vs) ==> Value(v)
-  ensures ValidState(NewState(params, vs))
-{
-  NormalFormNewState(params, vs);
-  MapFromList(Zip(params, vs))
-}
-
-lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
-  requires Length(vs) == Length(params)
-  requires forall v :: v in Elements(vs) ==> Value(v)
-  ensures ValidState(MapFromList(Zip(params, vs)))
-{
-  if !vs.Nil? {
-    NormalFormNewState(params.Tail, vs.Tail);
   }
 }
 
