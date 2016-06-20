@@ -253,7 +253,6 @@ function method FV_Gamma_Block(ss: Block): set<Id>
   Union(MapList(e' requires e' < ss => FV_Gamma_Statement(e'), ss))
 }
 
-
 // TYPING
 
 datatype Purity = Pure | Impure
@@ -414,32 +413,30 @@ predicate method TypeDecl(delta: Delta, declaration: Decl) {
 
 // BIG STEP SEMANTICS
 
-// TODO: Refactor so that body of complex constraints (e.g. if, while) are separate
-// predicates, so that we can refer to them more modularly in proofs.
-
 type State = map<Id, Expr>
 
-predicate TypeState(delta: Delta, gamma: Gamma, s: State) {
+predicate method TypeState(delta: Delta, gamma: Gamma, s: State) {
   forall id :: id in s ==>
-          id in gamma &&
-          TypeExpr(delta, gamma, s[id], gamma[id])
+    id in gamma &&
+    TypeExpr(delta, gamma, s[id], gamma[id])
 }
 
-predicate ValidState(s: State) {
+predicate method ValidState(s: State) {
   forall id :: id in s ==> Value(s[id])
 }
 
 type TopLevel = map<Id, (List<Id>, Block)>
 
-predicate TypeTopLevel(delta: Delta, d: TopLevel) {
+predicate method TypeProgram(delta: Delta, d: TopLevel) {
+  0 in delta && delta[0] == (Nil, Type.Unit, Impure) &&  // main is procedure 0, with no arguments and unit return
   forall proc :: proc in d ==>
-            proc in delta &&
-            var (ps, body)      := d[proc];
-            var (ts, r, purity) := delta[proc];
-            if Length(ps) != Length(ts) then false else
-            match purity
-              case Pure   => TypeDecl(delta,   Left(Function(Zip(ps, ts), r, body)))
-              case Impure => TypeDecl(delta, Right(Procedure(Zip(ps, ts), r, body)))
+    proc in delta &&
+    var (ps, body)      := d[proc];
+    var (ts, r, purity) := delta[proc];
+    if Length(ps) != Length(ts) then false else
+    match purity
+      case Pure   => TypeDecl(delta,   Left(Function(Zip(ps, ts), r, body)))
+      case Impure => TypeDecl(delta, Right(Procedure(Zip(ps, ts), r, body)))
 }
 
 predicate method Value(e: Expr) {
@@ -468,24 +465,24 @@ predicate ApplyDenotes(op: Op, e1: Expr, e2: Expr, result: Expr) {
         MathOpDenotes(mathOp, v1, v2, r)
 }
 
-predicate IsBool(b: bool, e: Expr) {
+predicate method IsBool(b: bool, e: Expr) {
   if e == True then b == true else
   if e == False then b == false else
   false
 }
 
-predicate IsLiteral(i: int, e: Expr) {
+predicate method IsLiteral(i: int, e: Expr) {
   if !e.Literal? then false
   else match e case Literal(l) => l == i
 }
 
-predicate BoolOpDenotes(op: BoolOp, b1: bool, b2: bool, result: bool) {
+predicate method BoolOpDenotes(op: BoolOp, b1: bool, b2: bool, result: bool) {
   match op
     case Or  => result == b1 || b2
     case And => result == b1 && b2
 }
 
-predicate RelOpDenotes(op: RelOp, v1: int, v2: int, result: bool) {
+predicate method RelOpDenotes(op: RelOp, v1: int, v2: int, result: bool) {
   match op
     case Eq  => result == (v1 == v2)
     case NEq => result == (v1 != v2)
@@ -493,7 +490,7 @@ predicate RelOpDenotes(op: RelOp, v1: int, v2: int, result: bool) {
     case LTE => result == (v1 <= v2)
 }
 
-predicate MathOpDenotes(op: MathOp, v1: int, v2: int, result: int) {
+predicate method MathOpDenotes(op: MathOp, v1: int, v2: int, result: int) {
   match op
     case Plus      =>           result == v1 + v2
     case Times     =>           result == v1 * v2
@@ -554,7 +551,7 @@ inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr)
     (EvalBlock(d, body, s, s', Nothing) && result == Expr.Unit)  // auto-unit return
 }
 
-function NewState(params: List<Id>, vs: List<Expr>): map<Id, Expr>
+function method NewState(params: List<Id>, vs: List<Expr>): map<Id, Expr>
   requires Length(vs) == Length(params)
   requires forall v :: v in Elements(vs) ==> Value(v)
   ensures ValidState(NewState(params, vs))
@@ -573,44 +570,44 @@ lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
   }
 }
 
-inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, result: Maybe<Expr>)
+inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': State, r: Maybe<Expr>)
   requires ValidState(s)
   requires ValidState(s'')
 {
   match c
     case Var(_, _) =>
-      result.Nothing? &&
+      r.Nothing? &&
       s == s''
     case Assign(id, e) =>
-      result.Nothing? &&
+      r.Nothing? &&
       exists v ::
         EvalExpr(d, s, e, v) &&
         s'' == s[id := v]
     case IfThenElse(e1, c2, c3) =>
-      exists b :: EvalIfStatement(d, e1, c2, c3, s, s'', result, b)
+      exists b :: EvalIfStatement(d, e1, c2, c3, s, s'', r, b)
     case While(e, c) =>
       exists b :: EvalBool(d, s, e, b) &&
         if !b
-          then s == s'' && result == Nothing
+          then s == s'' && r == Nothing
           else exists s', broken ::
-            EvalWhileLoop(d, e, c, s, s', s'', result, broken)
+            EvalWhileLoop(d, e, c, s, s', s'', r, broken)
     case Return(e) =>
       exists v ::
       EvalExpr(d, s, e, v) &&
-      result == Just(v) &&
+      r == Just(v) &&
       s == s''
     case Read(maybeId, t) =>
-      result.Nothing? &&
+      r.Nothing? &&
       if maybeId.Just? then
         var id := maybeId.FromJust;
         Havoc(id, t, s, s'')
       else s == s''
     case Print(_, es) =>
-      result.Nothing? &&
+      r.Nothing? &&
       s == s'' &&
       exists vs :: EvalList(d, s, es, vs)
     case Call(maybeId, p, es) =>
-      result.Nothing? &&
+      r.Nothing? &&
       exists vs, r ::
         EvalList(d, s, es, vs) &&
         EvalCall(d, p, vs, r) &&
@@ -666,6 +663,13 @@ inductive predicate EvalBlock(d: TopLevel, cs: Block, s: State, s'': State, resu
           then r == result && s' == s''
           else EvalBlock(d, cs', s', s'', result)
 }
+
+predicate EvalProgram(d: TopLevel, result: Expr)
+{
+  EvalCall(d, 0, Nil, Expr.Unit)
+}
+
+// NORMAL FORMS
 
 inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
   decreases e
@@ -739,13 +743,18 @@ inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: S
   }
 }
 
-inductive lemma PreservationBigStepExpr(d: TopLevel,  delta: Delta,
-                                        s: State,     gamma: Gamma,
-                                        e: Expr,      t: Type,
-                                        r: Expr)
-  requires TypeTopLevel(delta, d)        // top level is well-typed
-  requires TypeState(delta, gamma, s)    // environment is well-typed
-  requires ValidState(s)            // environment contains only values
-  requires TypeExpr(delta, gamma, e, t)  // e has type t
-  requires EvalExpr(d, s, e, r)          // e evaluates to r
-  ensures  TypeExpr(delta, gamma, r, t)  // ... then r also will have type t
+// inductive lemma PreservationBigStepExpr(d: TopLevel,  delta: Delta,
+//                                         s: State,     gamma: Gamma,
+//                                         e: Expr,      t: Type,
+//                                         r: Expr)
+//   requires TypeTopLevel(delta, d)        // top level is well-typed
+//   requires TypeState(delta, gamma, s)    // environment is well-typed
+//   requires ValidState(s)            // environment contains only values
+//   requires TypeExpr(delta, gamma, e, t)  // e has type t
+//   requires EvalExpr(d, s, e, r)          // e evaluates to r
+//   ensures  TypeExpr(delta, gamma, r, t)  // ... then r also will have type t
+// {
+//   if e.Call? {
+//     // fill in heree
+//   }
+// }
