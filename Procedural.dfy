@@ -69,6 +69,8 @@ ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C>
   match (xs, ys)
     case (Nil, Nil) => Nil
     case (Cons(x, xs'), Cons(y, ys')) => Cons(f(x, y), ZipWith(f, xs', ys'))
+    case (Nil, Cons(_,_)) => assert Length(xs) != Length(ys); Absurd()
+    case (Cons(_,_), Nil) => assert Length(xs) != Length(ys); Absurd()
 }
 
 function method Zip<A,B>(xs: List<A>, ys: List<B>): List<(A,B)>
@@ -147,7 +149,7 @@ datatype Either<A,B> = Left(A) | Right(B)
 function method Either<A,B,R>(f: A -> R, g: B -> R, e: Either<A,B>): R
   requires forall a :: f.reads(a) == {}
   requires forall b :: g.reads(b) == {}
-  requires forall a :: e == Left(a) ==> f.requires(a)
+  requires forall a :: e == Left(a)  ==> f.requires(a)
   requires forall b :: e == Right(b) ==> g.requires(b)
 {
   match e
@@ -199,7 +201,7 @@ datatype Function = Function(List<(Id, Type)>, Type, Block)
 
 type Block = List<Statement>
 
-datatype Statement = Var(Id, Type)
+datatype Statement = Var(Id, Type, Expr)
                    | Assign(Id, Expr)
                    | IfThenElse(Expr, Block, Block)
                    | While(Expr, Block)
@@ -231,7 +233,7 @@ function method FV_Gamma_Expr(e: Expr): set<Id>
 function method FV_Gamma_Statement(s: Statement): set<Id>
 {
   match s
-    case Var(v, _)             => {v}
+    case Var(v, _, e)          => {v} + FV_Gamma_Expr(e)
     case Assign(v, _)          => {v}
     case IfThenElse(e, s1, s2) => FV_Gamma_Expr(e) + FV_Gamma_Block(s1) + FV_Gamma_Block(s2)
     case While(e, s)           => FV_Gamma_Expr(e) + FV_Gamma_Block(s)
@@ -305,8 +307,8 @@ function method CheckStatement(delta: Delta, gamma: Gamma, rho: Type, s: Stateme
   decreases s
 {
   match s
-    case Var(id, t) =>
-      if id !in gamma
+    case Var(id, t, e) =>
+      if id !in gamma && TypeExpr(delta, gamma, e, t)
       then Just(gamma[id := t])
       else Nothing
     case Assign(id, e) =>
@@ -366,7 +368,7 @@ predicate method CertainStatement(s: Statement)
   match s
     case Return(_)             => true
     case IfThenElse(_, s1, s2) => CertainBlock(s1) && CertainBlock(s2)
-    case Var(_, _)             => false
+    case Var(_, _, _)          => false
     case Assign(_, _)          => false
     case While(_, _)           => false
     case Call(_, _, _)         => false
@@ -386,7 +388,7 @@ predicate method PureStatement(delta: Delta, s: Statement)
     case Read(_, _)            => false
     case IfThenElse(_, s1, s2) => PureBlock(delta, s1) && PureBlock(delta, s2)
     case While(_, s)           => PureBlock(delta, s)
-    case Var(_, _)             => true
+    case Var(_, _, _)          => true
     case Assign(_, _)          => true
     case Return(_)             => true
     case Call(_, id, _)        =>
@@ -422,24 +424,24 @@ predicate method TypeState(delta: Delta, gamma: Gamma, s: State) {
 }
 
 predicate method ValidState(s: State) {
-  forall id :: id in s ==> Value(s[id])
+  forall id | id in s :: SyntacticValue(s[id])
 }
 
 type TopLevel = map<Id, (List<Id>, Block)>
 
 predicate method TypeProgram(delta: Delta, d: TopLevel) {
   0 in delta && delta[0] == (Nil, Type.Unit, Impure) &&  // main is procedure 0, with no arguments and unit return
-  forall proc :: proc in d ==>
+  forall proc | proc in d ::
     proc in delta &&
     var (ps, body)      := d[proc];
     var (ts, r, purity) := delta[proc];
-    if Length(ps) != Length(ts) then false else
+    Length(ps) == Length(ts) &&
     match purity
       case Pure   => TypeDecl(delta,   Left(Function(Zip(ps, ts), r, body)))
       case Impure => TypeDecl(delta, Right(Procedure(Zip(ps, ts), r, body)))
 }
 
-predicate method Value(e: Expr) {
+predicate method SyntacticValue(e: Expr) {
   e.Unit? || e.False? || e.True? || e.Literal?
 }
 
@@ -544,7 +546,7 @@ inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr)
   p in d &&
   var (params, body) := d[p];
   Length(params) == Length(args) &&
-  (forall a :: a in Elements(args) ==> Value(a)) &&
+  (forall a :: a in Elements(args) ==> SyntacticValue(a)) &&
   var s := NewState(params, args);
   exists s' | ValidState(s') ::
      EvalBlock(d, body, s, s', Just(result)) ||                  // normal return
@@ -553,7 +555,7 @@ inductive predicate EvalCall(d: TopLevel, p: Id, args: List<Expr>, result: Expr)
 
 function method NewState(params: List<Id>, vs: List<Expr>): map<Id, Expr>
   requires Length(vs) == Length(params)
-  requires forall v :: v in Elements(vs) ==> Value(v)
+  requires forall v :: v in Elements(vs) ==> SyntacticValue(v)
   ensures ValidState(NewState(params, vs))
 {
   NormalFormNewState(params, vs);
@@ -562,7 +564,7 @@ function method NewState(params: List<Id>, vs: List<Expr>): map<Id, Expr>
 
 lemma NormalFormNewState(params: List<Id>, vs: List<Expr>)
   requires Length(vs) == Length(params)
-  requires forall v :: v in Elements(vs) ==> Value(v)
+  requires forall v :: v in Elements(vs) ==> SyntacticValue(v)
   ensures ValidState(MapFromList(Zip(params, vs)))
 {
   if !vs.Nil? {
@@ -575,9 +577,11 @@ inductive predicate EvalStatement(d: TopLevel, c: Statement, s: State, s'': Stat
   requires ValidState(s'')
 {
   match c
-    case Var(_, _) =>
+    case Var(id, _, e) =>
       r.Nothing? &&
-      s == s''
+      exists v ::
+        EvalExpr(d, s, e, v) &&
+        s'' == s[id := v]
     case Assign(id, e) =>
       r.Nothing? &&
       exists v ::
@@ -675,7 +679,7 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
   decreases e
   requires ValidState(s)
   requires EvalExpr(d, s, e, r)
-  ensures  Value(r)
+  ensures  SyntacticValue(r)
 {
   if e.Call? {
     match e
@@ -688,7 +692,7 @@ inductive lemma NormalFormBigStepExpr(d: TopLevel, s: State, e: Expr, r: Expr)
 
 inductive lemma NormalFormBigStepCall(d: TopLevel, p: Id, vs: List<Expr>, r: Expr)
   requires EvalCall(d, p, vs, r)
-  ensures  Value(r)
+  ensures  SyntacticValue(r)
 {
   var (params, body) := d[p];
   var s0 := NewState(params, vs);
@@ -701,7 +705,7 @@ inductive lemma NormalFormBigStepBlockReturn(d: TopLevel, cs: Block, s: State, s
   requires ValidState(s)
   requires ValidState(s'')
   requires EvalBlock(d, cs, s, s'', Just(r))
-  ensures  Value(r)
+  ensures  SyntacticValue(r)
 {
   match cs
     case Nil =>
@@ -720,7 +724,7 @@ inductive lemma NormalFormBigStepStatementReturn(d: TopLevel, c: Statement, s: S
   requires ValidState(s)
   requires ValidState(s'')
   requires EvalStatement(d, c, s, s'', Just(r))
-  ensures  Value(r)
+  ensures  SyntacticValue(r)
 {
   if c.Return? || c.IfThenElse? || c.While? {
     match c
