@@ -62,14 +62,12 @@ function method {:fuel (Length<A>), 3} {:fuel (Length<B>), 3}
 ZipWith<A,B,C>(f: (A, B) -> C, xs: List<A>, ys: List<B>): List<C>
   requires forall x, y :: f.reads(x, y) == {}
   requires forall x, y :: x in Elements(xs) && y in Elements(ys) ==> f.requires(x, y)
-  requires Length(xs) == Length(ys)
-  ensures  Length(ZipWith(f, xs, ys)) == Length(xs) == Length(ys)
+    requires Length(xs) == Length(ys)
+    ensures  Length(ZipWith(f, xs, ys)) == Length(xs) == Length(ys)
 {
   match (xs, ys)
     case (Nil, Nil) => Nil
     case (Cons(x, xs'), Cons(y, ys')) => Cons(f(x, y), ZipWith(f, xs', ys'))
-    case (Nil, Cons(_,_)) => assert Length(xs) != Length(ys); Absurd()
-    case (Cons(_,_), Nil) => assert Length(xs) != Length(ys); Absurd()
 }
 
 function method Zip<A,B>(xs: List<A>, ys: List<B>): List<(A,B)>
