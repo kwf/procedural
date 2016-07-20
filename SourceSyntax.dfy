@@ -1,24 +1,13 @@
 
 include "Prelude.dfy"
+include "Common.dfy"
 
 // SYNTAX
-
-type Id = int
-
-datatype Type = Unit | Bool | Int
 
 datatype Expr = Unit | False | True | Literal(int) | Id(Id)
               | Not(Expr) | Apply(Expr, Op, Expr)
               | IfThenElse(Expr, Expr, Expr)
               | Call(Id, List<Expr>)
-
-datatype Op = RelOp(RelOp) | BoolOp(BoolOp) | MathOp(MathOp)
-
-datatype RelOp = Eq | NEq | LT | LTE
-
-datatype BoolOp = Or | And
-
-datatype MathOp = Plus | Minus | Times | DividedBy | Mod
 
 type Program = map<Id, Decl>
 
@@ -39,7 +28,6 @@ datatype Statement = Var(Id, Type, Expr)
                    | Read(Maybe<Id>, Type)
                    | Print(FormatString, List<Expr>)
 
-type FormatString = List<Either<Type, string>>
 
 type TopLevel = map<Id, (List<Id>, Block)>
 
