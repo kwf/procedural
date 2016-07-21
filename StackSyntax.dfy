@@ -7,7 +7,7 @@ type nu = Id
 type Sigma = seq<Type>
 type sigma = seq<value>
 
-type Phi = seq<(Phi, Sigma)>
+datatype Phi = Phi(out: seq<(Phi, Sigma)>)
 type phi = seq<(nu, sigma)>
 
 type Delta = map<nu, Phi>
