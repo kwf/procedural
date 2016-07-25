@@ -15,7 +15,7 @@ function method SeqFromList<A>(xs: List<A>): seq<A> {
   match xs
     case Nil => []
     case Cons(x, xs) =>
-      [x] + SeqFromList(xs)
+      [x] + SeqFromList(xs);
 }
 
 function method Length(xs: List): nat {

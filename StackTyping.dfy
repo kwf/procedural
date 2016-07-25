@@ -40,12 +40,12 @@ function method TypeCommand(c: command, S: Sigma): Maybe<Sigma> {
         else Nothing
     case pop(n) =>
       if n <= |S|
-        then Just(S[|S| - n .. |S|])
+        then Just(S[n ..])
         else Nothing
     case apply(n, o) =>
       if n <= |S|
-        then var S'  := S[0 .. n];
-             var S'' := S[n .. |S|];
+        then var S'  := S[.. n];
+             var S'' := S[n ..];
              var (So, t) := TypeOperation(o);
              if S' == So
                then Just([t] + S'')
@@ -79,14 +79,58 @@ function method Uncons<A>(v: seq<A>): (A, seq<A>)
   (xs[0], ys)
 }
 
+predicate method Prefix<A(==)>(s: seq<A>, t: seq<A>) {
+  |s| <= |t| &&
+    forall i | 0 <= i < |s| :: s[i] == t[i]
+}
+
+lemma PrefixReflexive<A(==)>(s: seq<A>)
+  ensures Prefix(s, s)
+{
+}
+
+lemma PrefixAntisymmetric<A(==)>(s: seq<A>, t: seq<A>)
+  requires Prefix(s, t)
+  requires Prefix(t, s)
+  ensures s == t
+{
+}
+
+lemma PrefixTransitive<A(==)>(r: seq<A>, s: seq<A>, t: seq<A>)
+  requires Prefix(r, s)
+  requires Prefix(s, t)
+  ensures  Prefix(r, t)
+{
+}
+
+predicate method SubPhi(s: Phi, t: Phi) {
+  var (s, t) := (s.out, t.out);
+  |s| <= |t| &&
+    forall i | 0 <= i < |s| ::
+      SubPhi(s[i].0, t[i].0) &&
+      Prefix(s[i].1, t[i].1)
+}
+
+lemma SubPhiReflexive(s: Phi)
+  ensures SubPhi(s, s)
+{
+}
+
+lemma SubPhiTransitive(r: Phi, s: Phi, t: Phi)
+  requires SubPhi(r, s)
+  requires SubPhi(s, t)
+  ensures  SubPhi(r, t)
+{
+}
+
 predicate method TypeJump(D: Delta, SigmaH: Sigma, j: jump, P: Phi) {
   match j
     case goto(n) =>
-      n in D && P == D[n]
+      n in D && SubPhi(D[n], P)
     case halt =>
       0 < |P.out| &&
       var ((PhiR', SigmaH'), Phi_rest) := Uncons(P.out);
-      SigmaH' == SigmaH
+      Prefix(SigmaH, SigmaH')
     case branch(n1, n2) =>
       0 < |P.out| &&
       n1 in D && n2 in D &&
@@ -95,28 +139,21 @@ predicate method TypeJump(D: Delta, SigmaH: Sigma, j: jump, P: Phi) {
       var (t, S') := Uncons(S);
       t == Bool &&
       var P' := Phi([(PhiR, S')] + Phi_rest);
-      D[n1] == D[n2] == P'
+      SubPhi(D[n1], P') && SubPhi(D[n2], P')
     case call(n, nJ, nR) =>
       0 < |P.out| &&
       nJ in D && nR in D &&
       var ((PhiR, S), Phi_rest) := Uncons(P.out);
       n < |S| &&
       var (S1, S2) := Split(n, S);
-      D[nJ] == Phi([(D[nR], S1), (PhiR, S2)] + Phi_rest)
+      SubPhi(D[nJ], Phi([(D[nR], S1), (PhiR, S2)] + Phi_rest))
     case ret(n) =>
       |P.out| >= 2 &&
-      var ((Phi(PhiR_now), SS), Phi_rest) := Uncons(P.out);
+      var ((PhiR_now, SS), Phi_rest) := Uncons(P.out);
       n <= |SS| &&
       var (S_check, S_nope) := Split(n, SS);
-      var ((PhiR,  S),   Phi_rest')  := Uncons(Phi_rest);
-      0 < |PhiR_now| &&
-      var ((PhiR', SS'), Phi_rest'') := Uncons(PhiR_now);
-      n <= |SS'| &&
-      var (S_check', S') := Split(n, SS');
-      S == S' &&
-      S_check == S_check' &&
-      PhiR == PhiR' &&
-      Phi_rest' == Phi_rest''
+      var ((PhiR,  S),  Phi_rest')  := Uncons(Phi_rest);
+      SubPhi(PhiR_now, Phi([(PhiR, S_check + S)] + Phi_rest'))
 }
 
 predicate method TypeBlock(D: Delta, SigmaH: Sigma, b: block, P: Phi) {
@@ -125,7 +162,61 @@ predicate method TypeBlock(D: Delta, SigmaH: Sigma, b: block, P: Phi) {
   var ((PhiR, S), P_rest) := Uncons(P.out);
   match TypeCommands(cs, S)
     case Nothing => false
-    case Just(S') => TypeJump(D, SigmaH, j, Phi([(PhiR, S')] + P_rest))
+    case Just(S_final) => TypeJump(D, SigmaH, j, Phi([(PhiR, S_final)] + P_rest))
+}
+
+lemma TypeCommandExpansion(c: command, S1: Sigma, S1_out: Sigma, S2: Sigma)
+  requires Prefix(S1, S2)
+  requires TypeCommand(c, S1) == Just(S1_out)
+  ensures  exists S2_out :: TypeCommand(c, S2) == Just(S2_out)
+{
+}
+
+lemma TypeCommandPrefixPreservation(c: command, S1: Sigma, S2: Sigma, S1': Sigma, S2': Sigma)
+  requires Prefix(S1, S2)
+  requires TypeCommand(c, S1) == Just(S1')
+  requires TypeCommand(c, S2) == Just(S2')
+  ensures  Prefix(S1', S2')
+{
+}
+
+lemma TypeCommandsExpansion(cs: List<command>, S1: Sigma, S1_out: Sigma, S2: Sigma)
+  requires Prefix(S1, S2)
+  requires TypeCommands(cs, S1) == Just(S1_out)
+  ensures  exists S2_out :: TypeCommands(cs, S2) == Just(S2_out) && Prefix(S1_out, S2_out)
+{
+  match cs
+    case Nil =>
+    case Cons(c, cs) =>
+      var S1' := TypeCommand(c, S1).FromJust;
+      var S2' := TypeCommand(c, S2).FromJust;
+      TypeCommandExpansion(c, S1, S1', S2);
+      TypeCommandsExpansion(cs, S1', S1_out, S2');
+}
+
+lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
+  requires TypeBlock(D, SigmaH, b, P)
+  requires SubPhi(P, P')
+  ensures  TypeBlock(D, SigmaH, b, P')
+{
+  var (cs, j) := b;
+  var ((PhiR, S), P_rest) := Uncons(P.out);
+  var ((PhiR', S'), P_rest') := Uncons(P'.out);
+  match TypeCommands(cs, S)
+    case Just(S_final) =>
+      TypeCommandsExpansion(cs, S, S_final, S');
+      var S_final' := TypeCommands(cs, S').FromJust;
+      match j
+        case goto(n) =>
+          SubPhiTransitive(D[n], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
+        case halt =>
+        case branch(n1, n2) =>
+          var (_, S_final)  := Uncons(S_final);
+          var (_, S_final') := Uncons(S_final');
+          SubPhiTransitive(D[n1], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
+          SubPhiTransitive(D[n2], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
+        case call(n, nj, nr) =>
+        case ret(n) =>
 }
 
 // What I want:
