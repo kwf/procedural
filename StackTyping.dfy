@@ -216,6 +216,9 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           SubPhiTransitive(D[n1], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
           SubPhiTransitive(D[n2], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
         case call(n, nj, nr) =>
+          var (S1, S2)   := Split(n, S);
+          var (S1', S2') := Split(n, S');
+          SubPhiTransitive(D[nJ], Phi([(D[nR], S1), (PhiR, S2)] + Phi_rest), Phi([(D[nR], S1'), (PhiR', S2')] + Phi_rest'));
         case ret(n) =>
 }
 
