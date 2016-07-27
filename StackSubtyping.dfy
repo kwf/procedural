@@ -127,7 +127,7 @@ lemma SubPhiFlip(s: Phi, t: Phi)
 
 lemma SubPhiUnflip(s: Phi, t: Phi)
   requires SubPhiSigned(true, s, t)
-  ensures  SubPhiSigned(false, t, s)
+  ensures  SubPhi(s, t)
 {
   SubPhiFlipSigned(true, s, t);
 }
