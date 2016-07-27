@@ -53,6 +53,31 @@ lemma SubPhiReflexive(s: Phi)
   SubPhiReflexiveSigned(true, s);
 }
 
+lemma SubPhiAntisymmetricSigned(p: bool, s: Phi, t: Phi)
+  decreases s, t
+  requires SubPhiSigned(p, s, t)
+  requires SubPhiSigned(!p, s, t)
+  ensures  s == t
+{
+  var (s, t) := (s.out, t.out);
+  forall i | 0 <= i < |s|
+    ensures s[i] == t[i]
+  {
+    PrefixAntisymmetric(s[i].1, t[i].1);
+    SubPhiAntisymmetricSigned(p, s[i].0, t[i].0);
+  }
+  assert s == t;
+}
+
+lemma SubPhiAntisymmetric(s: Phi, t: Phi)
+  decreases s, t
+  requires SubPhi(s, t)
+  requires SubPhi(t, s)
+  ensures  s == t
+{
+  SubPhiAntisymmetricSigned(true, s, t);
+}
+
 lemma SubPhiTransitiveSigned(p: bool, r: Phi, s: Phi, t: Phi)
   decreases s
   requires SubPhiSigned(p, r, s)
@@ -119,15 +144,12 @@ lemma SubPhiFlipSigned(p: bool, s: Phi, t: Phi)
 }
 
 lemma SubPhiFlip(s: Phi, t: Phi)
-  requires SubPhiSigned(false, t, s)
+  requires SubPhiSigned(true, s, t) || SubPhiSigned(false, t, s)
   ensures  SubPhi(s, t)
 {
-  SubPhiFlipSigned(false, t, s);
-}
-
-lemma SubPhiUnflip(s: Phi, t: Phi)
-  requires SubPhiSigned(true, s, t)
-  ensures  SubPhi(s, t)
-{
-  SubPhiFlipSigned(true, s, t);
+  if SubPhiSigned(true, s, t) {
+    SubPhiFlipSigned(true, s, t);
+  } else {
+    SubPhiFlipSigned(false, t, s);
+  }
 }
