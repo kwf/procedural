@@ -181,7 +181,7 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           var (S1', S2') := Split(n, S_final');
           var Phi_final  := [(D[nR], S1),  (PhiR,  S2)]  + Phi_rest;
           var Phi_final' := [(D[nR], S1'), (PhiR', S2')] + Phi_rest';
-          SubPhiReflexiveSigned(false, D[nR]);
+          SubPhiReflexive(D[nR]);
           SubPhiTransitive(D[nJ], Phi(Phi_final), Phi(Phi_final'));
         case ret(n) =>
           var (S_check,  _) := Split(n, S_final);
@@ -192,7 +192,6 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           var Phi_final' :=  Phi([(PhiR_origin', S_check' + S_origin')] + Phi_rest_rest');
           SubPhiTransitive(PhiR, Phi_final, Phi_final');
           SubPhiAllContravariant(P, P');
-          SubPhiFlip(PhiR', PhiR);
           SubPhiTransitive(PhiR', PhiR, Phi_final');
 }
 

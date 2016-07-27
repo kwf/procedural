@@ -39,11 +39,11 @@ predicate method SubPhiSigned(p: bool, s: Phi, t: Phi)
 
 predicate method SubPhi(s: Phi, t: Phi)
 {
-  SubPhiSigned(true, s, t)
+  SubPhiSigned(true, s, t) && SubPhiSigned(false, t, s)
 }
 
 lemma SubPhiReflexiveSigned(p: bool, s: Phi)
-  ensures SubPhiSigned(p, s, s)
+  ensures SubPhiSigned(p, s, s) && SubPhiSigned(!p, s, s)
 {
 }
 
@@ -78,6 +78,7 @@ lemma SubPhiTransitive(r: Phi, s: Phi, t: Phi)
   ensures  SubPhi(r, t)
 {
   SubPhiTransitiveSigned(true, r, s, t);
+  SubPhiTransitiveSigned(false, t, s, r);
 }
 
 lemma SubPhiAllContravariantSigned(p: bool, s: Phi, t: Phi)
@@ -122,4 +123,11 @@ lemma SubPhiFlip(s: Phi, t: Phi)
   ensures  SubPhi(s, t)
 {
   SubPhiFlipSigned(false, t, s);
+}
+
+lemma SubPhiUnflip(s: Phi, t: Phi)
+  requires SubPhiSigned(true, s, t)
+  ensures  SubPhiSigned(false, t, s)
+{
+  SubPhiFlipSigned(true, s, t);
 }
