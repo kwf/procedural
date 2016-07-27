@@ -103,17 +103,51 @@ lemma PrefixTransitive<A(==)>(r: seq<A>, s: seq<A>, t: seq<A>)
 {
 }
 
-predicate method SubPhi(s: Phi, t: Phi) {
+predicate method SubPhiSigned(p: bool, s: Phi, t: Phi)
+  decreases s, t
+{
   var (s, t) := (s.out, t.out);
-  |s| <= |t| &&
-    forall i | 0 <= i < |s| ::
-      SubPhi(s[i].0, t[i].0) &&
-      Prefix(s[i].1, t[i].1)
+  (if p then |s| <= |t|
+        else |t| <= |s|) &&
+  forall i | 0 <= i < |if p then s else t| ::
+    SubPhiSigned(!p, s[i].0, t[i].0) &&
+    if p then Prefix(s[i].1, t[i].1)
+         else Prefix(t[i].1, s[i].1)
+}
+
+predicate method SubPhi(s: Phi, t: Phi)
+{
+  SubPhiSigned(true, s, t)
+}
+
+lemma SubPhiReflexiveSigned(p: bool, s: Phi)
+  ensures SubPhiSigned(p, s, s)
+{
 }
 
 lemma SubPhiReflexive(s: Phi)
   ensures SubPhi(s, s)
 {
+  SubPhiReflexiveSigned(true, s);
+}
+
+lemma SubPhiTransitiveSigned(p: bool, r: Phi, s: Phi, t: Phi)
+  decreases s
+  requires SubPhiSigned(p, r, s)
+  requires SubPhiSigned(p, s, t)
+  ensures  SubPhiSigned(p, r, t)
+{
+  var (r, s, t) := (r.out, s.out, t.out);
+  forall i | 0 <= i < |if p then r else t|
+    ensures SubPhiSigned(!p, r[i].0, t[i].0);
+  {
+    if p {
+      PrefixTransitive(r[i].1, s[i].1, t[i].1);
+    } else {
+      PrefixTransitive(t[i].1, s[i].1, r[i].1);
+    }
+    SubPhiTransitiveSigned(!p, r[i].0, s[i].0, t[i].0);
+  }
 }
 
 lemma SubPhiTransitive(r: Phi, s: Phi, t: Phi)
@@ -121,6 +155,51 @@ lemma SubPhiTransitive(r: Phi, s: Phi, t: Phi)
   requires SubPhi(s, t)
   ensures  SubPhi(r, t)
 {
+  SubPhiTransitiveSigned(true, r, s, t);
+}
+
+lemma SubPhiAllContravariantSigned(p: bool, s: Phi, t: Phi)
+  decreases s, t
+  requires SubPhiSigned(p, s, t)
+  ensures  forall i | 0 <= i < |if p then s.out else t.out| ::
+             SubPhiSigned(!p, s.out[i].0, t.out[i].0)
+{
+  var (s, t) := (s.out, t.out);
+  forall i | 0 <= i < |if p then s else t|
+    ensures SubPhiSigned(!p, s[i].0, t[i].0)
+  {
+    SubPhiAllContravariantSigned(!p, s[i].0, t[i].0);
+  }
+}
+
+lemma SubPhiAllContravariant(s: Phi, t: Phi)
+  requires SubPhi(s, t)
+  ensures  forall i | 0 <= i < |s.out| :: SubPhi(t.out[i].0, s.out[i].0)
+{
+  SubPhiAllContravariantSigned(true, s, t);
+  forall i | 0 <= i < |s.out| {
+    SubPhiFlip(t.out[i].0, s.out[i].0);
+  }
+}
+
+lemma SubPhiFlipSigned(p: bool, s: Phi, t: Phi)
+  decreases s, t
+  requires SubPhiSigned(p,  s, t)
+  ensures  SubPhiSigned(!p, t, s)
+{
+  var (s, t) := (s.out, t.out);
+  forall i | 0 <= i < |if p then s else t|
+    ensures SubPhiSigned(p, t[i].0, s[i].0)
+  {
+    SubPhiFlipSigned(!p, s[i].0, t[i].0);
+  }
+}
+
+lemma SubPhiFlip(s: Phi, t: Phi)
+  requires SubPhiSigned(false, t, s)
+  ensures  SubPhi(s, t)
+{
+  SubPhiFlipSigned(false, t, s);
 }
 
 predicate method TypeJump(D: Delta, SigmaH: Sigma, j: jump, P: Phi) {
@@ -149,11 +228,11 @@ predicate method TypeJump(D: Delta, SigmaH: Sigma, j: jump, P: Phi) {
       SubPhi(D[nJ], Phi([(D[nR], S1), (PhiR, S2)] + Phi_rest))
     case ret(n) =>
       |P.out| >= 2 &&
-      var ((PhiR_now, SS), Phi_rest) := Uncons(P.out);
-      n <= |SS| &&
-      var (S_check, S_nope) := Split(n, SS);
-      var ((PhiR,  S),  Phi_rest')  := Uncons(Phi_rest);
-      SubPhi(PhiR_now, Phi([(PhiR, S_check + S)] + Phi_rest'))
+      var ((PhiR, S), Phi_rest) := Uncons(P.out);
+      var ((PhiR_origin, S_origin), Phi_rest_rest)  := Uncons(Phi_rest);
+      n <= |S| &&
+      var (S_check, _) := Split(n, S);
+      SubPhi(PhiR, Phi([(PhiR_origin, S_check + S_origin)] + Phi_rest_rest))
 }
 
 predicate method TypeBlock(D: Delta, SigmaH: Sigma, b: block, P: Phi) {
@@ -200,26 +279,60 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
   ensures  TypeBlock(D, SigmaH, b, P')
 {
   var (cs, j) := b;
-  var ((PhiR, S), P_rest) := Uncons(P.out);
-  var ((PhiR', S'), P_rest') := Uncons(P'.out);
+  var ((PhiR,  S),  Phi_rest)  := Uncons(P.out);
+  var ((PhiR', S'), Phi_rest') := Uncons(P'.out);
+  SubPhiAllContravariant(P, P');
+  SubPhiFlip(PhiR', PhiR);
+  assert SubPhi(PhiR', PhiR);
   match TypeCommands(cs, S)
     case Just(S_final) =>
       TypeCommandsExpansion(cs, S, S_final, S');
       var S_final' := TypeCommands(cs, S').FromJust;
       match j
         case goto(n) =>
-          SubPhiTransitive(D[n], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
+          var Phi_final  := Phi([(PhiR,  S_final)]  + Phi_rest);
+          var Phi_final' := Phi([(PhiR', S_final')] + Phi_rest');
+          SubPhiTransitive(D[n], Phi_final, Phi_final');
         case halt =>
         case branch(n1, n2) =>
           var (_, S_final)  := Uncons(S_final);
           var (_, S_final') := Uncons(S_final');
-          SubPhiTransitive(D[n1], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
-          SubPhiTransitive(D[n2], Phi([(PhiR, S_final)] + P_rest), Phi([(PhiR', S_final')] + P_rest'));
-        case call(n, nj, nr) =>
-          var (S1, S2)   := Split(n, S);
-          var (S1', S2') := Split(n, S');
-          SubPhiTransitive(D[nJ], Phi([(D[nR], S1), (PhiR, S2)] + Phi_rest), Phi([(D[nR], S1'), (PhiR', S2')] + Phi_rest'));
+          var Phi_final  := Phi([(PhiR,  S_final)]  + Phi_rest);
+          var Phi_final' := Phi([(PhiR', S_final')] + Phi_rest');
+          SubPhiTransitive(D[n1], Phi_final, Phi_final');
+          SubPhiTransitive(D[n2], Phi_final, Phi_final');
+        case call(n, nJ, nR) =>
+          var (S1,  S2)  := Split(n, S_final);
+          var (S1', S2') := Split(n, S_final');
+          var Phi_final  := [(D[nR], S1),  (PhiR,  S2)]  + Phi_rest;
+          var Phi_final' := [(D[nR], S1'), (PhiR', S2')] + Phi_rest';
+          // SubPhiAllContravariant(Phi(Phi_rest), Phi(Phi_rest'));
+          // SubPhiAllContravariantSigned(true, Phi(Phi_rest), Phi(Phi_rest'));
+          forall i | 0 <= i < |Phi_final|
+            ensures SubPhiSigned(false, Phi_final[i].0, Phi_final'[i].0)
+          {
+            if i == 0 {
+              assert Phi_final[0].0 == Phi_final'[0].0 == D[nR];
+              SubPhiReflexive(D[nR]);
+            } else if i == 1 {
+              assert Phi_final[1].0  == PhiR;
+              assert Phi_final'[1].0 == PhiR';
+              assert SubPhiSigned(false, PhiR, PhiR');
+            } else {
+              assert SubPhiSigned(false, Phi_final[i].0, Phi_final'[i].0);
+            }
+          }
+          // assert |Phi_rest| <= |Phi_rest'|;
+          assert SubPhi(Phi(Phi_final), Phi(Phi_final'));
+          SubPhiTransitive(D[nJ], Phi(Phi_final), Phi(Phi_final'));
         case ret(n) =>
+          var (S_check,  _) := Split(n, S_final);
+          var (S_check', _) := Split(n, S_final');
+          var ((PhiR_origin,  S_origin),  Phi_rest_rest)  := Uncons(Phi_rest);
+          var ((PhiR_origin', S_origin'), Phi_rest_rest') := Uncons(Phi_rest');
+          var Phi_final  :=  Phi([(PhiR_origin,  S_check  + S_origin)]  + Phi_rest_rest);
+          var Phi_final' :=  Phi([(PhiR_origin', S_check' + S_origin')] + Phi_rest_rest');
+          SubPhiTransitive(PhiR, Phi_final, Phi_final');
 }
 
 // What I want:

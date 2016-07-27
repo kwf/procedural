@@ -11,11 +11,12 @@ function method Snd<A,B>(p: (A,B)): B { p.1 }
 
 datatype List<A> = Cons(Head: A, Tail: List<A>) | Nil
 
-function method SeqFromList<A>(xs: List<A>): seq<A> {
+function method SeqFromList<A>(xs: List<A>): seq<A>
+{
   match xs
     case Nil => []
     case Cons(x, xs) =>
-      [x] + SeqFromList(xs);
+      [x] + SeqFromList(xs)
 }
 
 function method Length(xs: List): nat {
