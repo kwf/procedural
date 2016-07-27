@@ -306,24 +306,7 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           var (S1', S2') := Split(n, S_final');
           var Phi_final  := [(D[nR], S1),  (PhiR,  S2)]  + Phi_rest;
           var Phi_final' := [(D[nR], S1'), (PhiR', S2')] + Phi_rest';
-          // SubPhiAllContravariant(Phi(Phi_rest), Phi(Phi_rest'));
-          // SubPhiAllContravariantSigned(true, Phi(Phi_rest), Phi(Phi_rest'));
-          forall i | 0 <= i < |Phi_final|
-            ensures SubPhiSigned(false, Phi_final[i].0, Phi_final'[i].0)
-          {
-            if i == 0 {
-              assert Phi_final[0].0 == Phi_final'[0].0 == D[nR];
-              SubPhiReflexive(D[nR]);
-            } else if i == 1 {
-              assert Phi_final[1].0  == PhiR;
-              assert Phi_final'[1].0 == PhiR';
-              assert SubPhiSigned(false, PhiR, PhiR');
-            } else {
-              assert SubPhiSigned(false, Phi_final[i].0, Phi_final'[i].0);
-            }
-          }
-          // assert |Phi_rest| <= |Phi_rest'|;
-          assert SubPhi(Phi(Phi_final), Phi(Phi_final'));
+          SubPhiReflexiveSigned(false, D[nR]);
           SubPhiTransitive(D[nJ], Phi(Phi_final), Phi(Phi_final'));
         case ret(n) =>
           var (S_check,  _) := Split(n, S_final);
@@ -333,7 +316,9 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           var Phi_final  :=  Phi([(PhiR_origin,  S_check  + S_origin)]  + Phi_rest_rest);
           var Phi_final' :=  Phi([(PhiR_origin', S_check' + S_origin')] + Phi_rest_rest');
           SubPhiTransitive(PhiR, Phi_final, Phi_final');
+          SubPhiTransitive(PhiR', PhiR, Phi_final');
 }
+
 
 // What I want:
 //    - pattern matching on sequences using literal and slice notation
