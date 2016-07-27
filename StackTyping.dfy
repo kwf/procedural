@@ -281,9 +281,6 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
   var (cs, j) := b;
   var ((PhiR,  S),  Phi_rest)  := Uncons(P.out);
   var ((PhiR', S'), Phi_rest') := Uncons(P'.out);
-  SubPhiAllContravariant(P, P');
-  SubPhiFlip(PhiR', PhiR);
-  assert SubPhi(PhiR', PhiR);
   match TypeCommands(cs, S)
     case Just(S_final) =>
       TypeCommandsExpansion(cs, S, S_final, S');
@@ -316,6 +313,8 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           var Phi_final  :=  Phi([(PhiR_origin,  S_check  + S_origin)]  + Phi_rest_rest);
           var Phi_final' :=  Phi([(PhiR_origin', S_check' + S_origin')] + Phi_rest_rest');
           SubPhiTransitive(PhiR, Phi_final, Phi_final');
+          SubPhiAllContravariant(P, P');
+          SubPhiFlip(PhiR', PhiR);
           SubPhiTransitive(PhiR', PhiR, Phi_final');
 }
 
