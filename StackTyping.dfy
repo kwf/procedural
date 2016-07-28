@@ -50,7 +50,7 @@ function method TypeCommand(c: command, S: Sigma): Maybe<Sigma> {
   match c
     case store(n) =>
       if n < |S| && S != []
-        then Just(S[n := S[n]])
+        then Just(S[n := S[0]][1 ..])
         else Nothing
     case load(n) =>
       if n < |S|
@@ -62,8 +62,7 @@ function method TypeCommand(c: command, S: Sigma): Maybe<Sigma> {
         else Nothing
     case apply(n, o) =>
       if n <= |S|
-        then var S'  := S[.. n];
-             var S'' := S[n ..];
+        then var (S', S'') := Split(n, S);
              var (So, t) := TypeOperation(o);
              if S' == So
                then Just([t] + S'')
@@ -193,6 +192,11 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           SubPhiTransitive(PhiR, Phi_final, Phi_final');
           SubPhiAllContravariant(P, P');
           SubPhiTransitive(PhiR', PhiR, Phi_final');
+}
+
+lemma Example()
+  ensures TypeBlock(map[0 := Phi([])], [], (Nil, goto(0)), Phi([(Phi([]), [])]))
+{
 }
 
 

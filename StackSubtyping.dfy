@@ -28,7 +28,7 @@ lemma PrefixTransitive<A(==)>(r: seq<A>, s: seq<A>, t: seq<A>)
 predicate method SubPhiSigned(p: bool, s: Phi, t: Phi)
   decreases s, t
 {
-  var (s, t) := (s.out, t.out);
+  var s, t := s.out, t.out;
   (if p then |s| <= |t|
         else |t| <= |s|) &&
   forall i | 0 <= i < |if p then s else t| ::
