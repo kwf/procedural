@@ -13,8 +13,8 @@ type phi = seq<(nu, sigma)>
 type Delta = map<nu, Phi>
 type delta = map<nu, block>
 
-datatype value = integer(int)
-               | boolean(bool)
+datatype value = integer(getInteger: int)
+               | boolean(getBoolean: bool)
                | unit
 
 datatype operation = binary(Op)
