@@ -28,6 +28,23 @@ function method TypeValue(v: value): Type {
     case unit       => Unit
 }
 
+function method TypeSigma(s: sigma): Sigma {
+  MapSeq(TypeValue, s)
+}
+
+predicate method ValidStack(D: Delta, phi: phi) {
+  forall frame | frame in phi :: frame.0 in D
+}
+
+function method TypePhi(D: Delta, phi: phi): Phi
+  requires ValidStack(D, phi)
+{
+  var names  := MapSeq((frame: (nu, sigma)) => frame.0, phi);
+  var frames := MapSeq((frame: (nu, sigma)) => frame.1, phi);
+  Phi(ZipSeq(MapSeq(i requires i in D => D[i], names),
+             MapSeq(TypeSigma, frames)))
+}
+
 function method TypeOperation(o: operation): (Sigma, Type) {
   match o
     case not => ([Bool], Bool)
@@ -119,6 +136,11 @@ predicate method TypeBlock(D: Delta, SigmaH: Sigma, b: block, P: Phi) {
   match TypeCommands(cs, S)
     case Nothing => false
     case Just(S_final) => TypeJump(D, SigmaH, j, Phi([(PhiR, S_final)] + P_rest))
+}
+
+predicate TypeProgram(SigmaH: Sigma, D: Delta, d: delta) {
+  (forall i :: i in D <==> i in d) &&
+  forall i :: i in D ==> TypeBlock(D, SigmaH, d[i], D[i])
 }
 
 lemma TypeCommandExpansion(c: command, S1: Sigma, S1_out: Sigma, S2: Sigma)

@@ -175,3 +175,28 @@ function method Rights<A,B>(es: List<Either<A,B>>): List<B> {
     case Cons(Left(_),  es') => Rights(es')
     case Cons(Right(r), es') => Cons(r, Rights(es'))
 }
+
+function method MapSeq<A,B>(f: A -> B, xs: seq<A>): seq<B>
+  requires forall a :: f.reads(a) == {}
+  requires forall a | a in xs :: f.requires(a)
+  ensures |xs| == |MapSeq(f, xs)|
+  ensures forall i | 0 <= i < |xs| :: MapSeq(f, xs)[i] == f(xs[i])
+{
+  if |xs| == 0 then [] else
+    var x  := xs[0];
+    var xs := xs[1..];
+    [f(x)] + MapSeq(f, xs)
+}
+
+function method ZipSeq<A,B>(xs: seq<A>, ys: seq<B>): seq<(A, B)>
+  requires |xs| == |ys|
+  ensures  |xs| == |ys| == |ZipSeq(xs, ys)|
+  ensures forall i | 0 <= i < |xs| :: ZipSeq(xs, ys)[i] == (xs[i], ys[i])
+{
+  if |xs| == 0 then [] else
+    var x  := xs[0];
+    var y  := ys[0];
+    var xs := xs[1..];
+    var ys := ys[1..];
+    [(x, y)] + ZipSeq(xs, ys)
+}

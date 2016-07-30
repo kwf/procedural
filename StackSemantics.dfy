@@ -49,7 +49,7 @@ predicate method StepCommand(c: command, s: sigma, s': sigma)
       n < |s| &&
       s' == [s[n]] + s
     case pop(n) =>
-      n < |s| &&
+      n <= |s| &&
       s' == s[n ..]
     case apply(n, o) =>
       n <= |s| &&
@@ -70,37 +70,33 @@ predicate method StepJump(d: delta, j: jump, phi: phi, phi': phi, b: block)
     case branch(nu1, nu2) =>
       nu1 in d && nu2 in d &&
       0 < |phi| == |phi'| &&
-      phi[1..] == phi'[1..] &&
       var nu := phi[0].0;
       var s := phi[0].1;
       0 < |s| &&
-      phi' == [(nu, s[1..])] &&
+      phi' == [(nu, s[1..])] + phi[1..] &&
       s[0].boolean? &&
       b == d[if s[0].getBoolean then nu1 else nu2]
     case call(n, nuJ, nuR) =>
       nuJ in d && nuR in d &&
       0 < |phi| == |phi'| - 1 &&
-      phi[1..] == phi'[2..] &&
       var nu := phi[0].0;
       var s := phi[0].1;
       n <= |s| &&
-      var (s', s'') := Split(n, s);
-      phi' == [(nuR, s''), (nu, s')] &&
+      var (s1, s2) := Split(n, s);
+      phi' == [(nuR, s1), (nu, s2)] + phi[1..] &&
       b == d[nuJ]
     case ret(n) =>
       0 < |phi| - 1 == |phi'| &&
-      phi[2..] == phi'[1..] &&
       var nuR := phi[0].0;
       var ss  := phi[0].1;
       n <= |ss| &&
       var (s_check, _) := Split(n, ss);
       var nu := phi[1].0;
       var s  := phi[1].1;
-      phi' == [(nu, s_check + s)] &&
+      phi' == [(nu, s_check + s)] + phi[2..] &&
       nuR in d && b == d[nuR]
 }
 
-// NOTE: I'm not sure I like how the polymorphism was factored out here.
 predicate method StepBlock(d: delta, b: block, phi: phi, phi': phi, b': block)
 {
   var (cs, j) := b;
@@ -114,7 +110,7 @@ predicate method StepBlock(d: delta, b: block, phi: phi, phi': phi, b': block)
       phi[1..] == phi'[1..] &&
       var s' := phi'[0].1;
       StepCommand(c, s, s') &&
-      b == (cs, j)
+      b' == (cs, j)
 }
 
 inductive predicate StepBlockStar(d: delta, b: block, phi: phi, phi'': phi, b'': block)
