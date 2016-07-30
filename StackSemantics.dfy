@@ -65,11 +65,12 @@ predicate method StepJump(d: delta, j: jump, phi: phi, phi': phi, b: block)
     case halt => false
     case goto(nu) =>
       nu in d &&
-      |phi| == |phi'| == 0 &&
+      phi == phi' &&
       b == d[nu]
     case branch(nu1, nu2) =>
       nu1 in d && nu2 in d &&
-      |phi| == |phi'| == 1 &&
+      0 < |phi| == |phi'| &&
+      phi[1..] == phi'[1..] &&
       var nu := phi[0].0;
       var s := phi[0].1;
       0 < |s| &&
@@ -78,7 +79,8 @@ predicate method StepJump(d: delta, j: jump, phi: phi, phi': phi, b: block)
       b == d[if s[0].getBoolean then nu1 else nu2]
     case call(n, nuJ, nuR) =>
       nuJ in d && nuR in d &&
-      |phi| == 1 && |phi'| == 2 &&
+      0 < |phi| == |phi'| - 1 &&
+      phi[1..] == phi'[2..] &&
       var nu := phi[0].0;
       var s := phi[0].1;
       n <= |s| &&
@@ -86,7 +88,8 @@ predicate method StepJump(d: delta, j: jump, phi: phi, phi': phi, b: block)
       phi' == [(nuR, s''), (nu, s')] &&
       b == d[nuJ]
     case ret(n) =>
-      |phi| == 2 && |phi'| == 1 &&
+      0 < |phi| - 1 == |phi'| &&
+      phi[2..] == phi'[1..] &&
       var nuR := phi[0].0;
       var ss  := phi[0].1;
       n <= |ss| &&
@@ -97,22 +100,21 @@ predicate method StepJump(d: delta, j: jump, phi: phi, phi': phi, b: block)
       nuR in d && b == d[nuR]
 }
 
+// NOTE: I'm not sure I like how the polymorphism was factored out here.
 predicate method StepBlock(d: delta, b: block, phi: phi, phi': phi, b': block)
 {
   var (cs, j) := b;
-  exists n, n' |
-    0 <= n < |phi| &&
-    0 <= n' < |phi'| ::
-    match cs
-      case Nil => StepJump(d, j, phi[..n], phi'[..n'], b')
-      case Cons(c, cs) =>
-        var nu := phi[0].0;
-        var s  := phi[0].1;
-        phi'[0].0 == nu &&
-        phi'[1..] == phi[1..] &&
-        var s' := phi'[0].1;
-        StepCommand(c, s, s') &&
-        b == (cs, j)
+  match cs
+    case Nil => StepJump(d, j, phi, phi', b')
+    case Cons(c, cs) =>
+      0 < |phi| == |phi'| &&
+      var nu := phi[0].0;
+      var s  := phi[0].1;
+      nu == phi'[0].0 &&
+      phi[1..] == phi'[1..] &&
+      var s' := phi'[0].1;
+      StepCommand(c, s, s') &&
+      b == (cs, j)
 }
 
 inductive predicate StepBlockStar(d: delta, b: block, phi: phi, phi'': phi, b'': block)
