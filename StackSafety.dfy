@@ -386,27 +386,21 @@ lemma PreservationJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi
       PreservationJumpRet(SigmaH, D, d, j, Phi, phi, phi', b');
 }
 
-// lemma PreservationBlock(SigmaH: Sigma, D: Delta, d: delta, b: block, Phi: Phi, phi: phi, phi': phi, b': block)
-//   requires TypeProgram(SigmaH, D, d)
-//   requires TypeBlock(D, SigmaH, b, Phi)
-//   requires ValidStack(D, phi)
-//   requires SubPhi(Phi, TypePhi(D, phi))
-//   requires StepBlock(d, b, phi, phi', b')
-//   ensures  TypeBlock(D, SigmaH, b', TypePhi(D, phi'))
-// {
-//   var (cs, j) := b;
-//   match cs
-//     case Cons(c, cs) =>
-//       var nu := phi[0].0;
-//       var s := phi[0].1;
-//       var S := Phi.out[0].1;
-//       SafetyCommand(c, s, S);
-//       var s' :| StepCommand(c, s, s') && Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'));
-//       assert TypeBlock(D, SigmaH, b', TypePhi(D, phi'));
-//     case Nil =>
-//       if j != halt {
-//         ProgressJump(SigmaH, D, d, j, Phi, phi);
-//         var phi', b' :| StepJump(d, j, phi, phi', b');
-//         assert StepBlock(d, b, phi, phi', b');
-//       }
-// }
+lemma PreservationBlock(SigmaH: Sigma, D: Delta, d: delta, b: block, Phi: Phi, phi: phi, phi': phi, b': block)
+  requires TypeProgram(SigmaH, D, d)
+  requires TypeBlock(D, SigmaH, b, Phi)
+  requires ValidStack(D, phi)
+  requires SubPhi(Phi, TypePhi(D, phi))
+  requires StepBlock(d, b, phi, phi', b')
+  ensures  TypeBlock(D, SigmaH, b', TypePhi(D, phi'))
+{
+  var (cs, j) := b;
+  match cs
+    case Cons(c, cs) =>
+      assume false; // TODO: Insert preservation lemma for commands here!
+      assert TypeBlock(D, SigmaH, b', TypePhi(D, phi'));
+    case Nil =>
+      if j != halt {
+        PreservationJump(SigmaH, D, d, j, Phi, phi, phi', b');
+      }
+}
