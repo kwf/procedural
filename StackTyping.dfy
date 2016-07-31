@@ -36,13 +36,15 @@ predicate method ValidStack(D: Delta, phi: phi) {
   forall frame | frame in phi :: frame.0 in D
 }
 
+function method TypeFrame(D: Delta): ((nu, sigma)) -> (Phi, Sigma) {
+  (frame: (nu, sigma)) requires frame.0 in D =>
+    (D[frame.0], TypeSigma(frame.1))
+}
+
 function method TypePhi(D: Delta, phi: phi): Phi
   requires ValidStack(D, phi)
 {
-  var names  := MapSeq((frame: (nu, sigma)) => frame.0, phi);
-  var frames := MapSeq((frame: (nu, sigma)) => frame.1, phi);
-  Phi(ZipSeq(MapSeq(i requires i in D => D[i], names),
-             MapSeq(TypeSigma, frames)))
+  MkPhi(MapSeq(TypeFrame(D), phi))
 }
 
 function method TypeOperation(o: operation): (Sigma, Type) {
@@ -111,7 +113,7 @@ predicate method TypeJump(D: Delta, SigmaH: Sigma, j: jump, P: Phi) {
       S != [] &&
       var (t, S') := Uncons(S);
       t == Bool &&
-      var P' := Phi([(PhiR, S')] + Phi_rest);
+      var P' := MkPhi([(PhiR, S')] + Phi_rest);
       SubPhi(D[n1], P') && SubPhi(D[n2], P')
     case call(n, nJ, nR) =>
       0 < |P.out| &&
@@ -119,14 +121,14 @@ predicate method TypeJump(D: Delta, SigmaH: Sigma, j: jump, P: Phi) {
       var ((PhiR, S), Phi_rest) := Uncons(P.out);
       n < |S| &&
       var (S1, S2) := Split(n, S);
-      SubPhi(D[nJ], Phi([(D[nR], S1), (PhiR, S2)] + Phi_rest))
+      SubPhi(D[nJ], MkPhi([(D[nR], S1), (PhiR, S2)] + Phi_rest))
     case ret(n) =>
       |P.out| >= 2 &&
       var ((PhiR, S), Phi_rest) := Uncons(P.out);
       var ((PhiR_origin, S_origin), Phi_rest_rest)  := Uncons(Phi_rest);
       n <= |S| &&
       var (S_check, _) := Split(n, S);
-      SubPhi(PhiR, Phi([(PhiR_origin, S_check + S_origin)] + Phi_rest_rest))
+      SubPhi(PhiR, MkPhi([(PhiR_origin, S_check + S_origin)] + Phi_rest_rest))
 }
 
 predicate method TypeBlock(D: Delta, SigmaH: Sigma, b: block, P: Phi) {
@@ -135,7 +137,7 @@ predicate method TypeBlock(D: Delta, SigmaH: Sigma, b: block, P: Phi) {
   var ((PhiR, S), P_rest) := Uncons(P.out);
   match TypeCommands(cs, S)
     case Nothing => false
-    case Just(S_final) => TypeJump(D, SigmaH, j, Phi([(PhiR, S_final)] + P_rest))
+    case Just(S_final) => TypeJump(D, SigmaH, j, MkPhi([(PhiR, S_final)] + P_rest))
 }
 
 predicate TypeProgram(SigmaH: Sigma, D: Delta, d: delta) {
@@ -186,15 +188,15 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
       var S_final' := TypeCommands(cs, S').FromJust;
       match j
         case goto(n) =>
-          var Phi_final  := Phi([(PhiR,  S_final)]  + Phi_rest);
-          var Phi_final' := Phi([(PhiR', S_final')] + Phi_rest');
+          var Phi_final  := MkPhi([(PhiR,  S_final)]  + Phi_rest);
+          var Phi_final' := MkPhi([(PhiR', S_final')] + Phi_rest');
           SubPhiTransitive(D[n], Phi_final, Phi_final');
         case halt =>
         case branch(n1, n2) =>
           var (_, S_final)  := Uncons(S_final);
           var (_, S_final') := Uncons(S_final');
-          var Phi_final  := Phi([(PhiR,  S_final)]  + Phi_rest);
-          var Phi_final' := Phi([(PhiR', S_final')] + Phi_rest');
+          var Phi_final  := MkPhi([(PhiR,  S_final)]  + Phi_rest);
+          var Phi_final' := MkPhi([(PhiR', S_final')] + Phi_rest');
           SubPhiTransitive(D[n1], Phi_final, Phi_final');
           SubPhiTransitive(D[n2], Phi_final, Phi_final');
         case call(n, nJ, nR) =>
@@ -203,21 +205,21 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           var Phi_final  := [(D[nR], S1),  (PhiR,  S2)]  + Phi_rest;
           var Phi_final' := [(D[nR], S1'), (PhiR', S2')] + Phi_rest';
           SubPhiReflexive(D[nR]);
-          SubPhiTransitive(D[nJ], Phi(Phi_final), Phi(Phi_final'));
+          SubPhiTransitive(D[nJ], MkPhi(Phi_final), MkPhi(Phi_final'));
         case ret(n) =>
           var (S_check,  _) := Split(n, S_final);
           var (S_check', _) := Split(n, S_final');
           var ((PhiR_origin,  S_origin),  Phi_rest_rest)  := Uncons(Phi_rest);
           var ((PhiR_origin', S_origin'), Phi_rest_rest') := Uncons(Phi_rest');
-          var Phi_final  :=  Phi([(PhiR_origin,  S_check  + S_origin)]  + Phi_rest_rest);
-          var Phi_final' :=  Phi([(PhiR_origin', S_check' + S_origin')] + Phi_rest_rest');
+          var Phi_final  :=  MkPhi([(PhiR_origin,  S_check  + S_origin)]  + Phi_rest_rest);
+          var Phi_final' :=  MkPhi([(PhiR_origin', S_check' + S_origin')] + Phi_rest_rest');
           SubPhiTransitive(PhiR, Phi_final, Phi_final');
           SubPhiAllContravariant(P, P');
           SubPhiTransitive(PhiR', PhiR, Phi_final');
 }
 
 lemma Example()
-  ensures TypeBlock(map[0 := Phi([])], [], (Nil, goto(0)), Phi([(Phi([]), [])]))
+  ensures TypeBlock(map[0 := MkPhi([])], [], (Nil, goto(0)), MkPhi([(MkPhi([]), [])]))
 {
 }
 

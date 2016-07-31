@@ -188,6 +188,29 @@ function method MapSeq<A,B>(f: A -> B, xs: seq<A>): seq<B>
     [f(x)] + MapSeq(f, xs)
 }
 
+lemma MapSeqHomomorphism<A,B>(f: A -> B, xs: seq<A>, ys: seq<A>)
+  requires forall a :: f.reads(a) == {}
+  requires forall a | a in xs :: f.requires(a)
+  requires forall a | a in ys :: f.requires(a)
+  ensures MapSeq(f, xs) + MapSeq(f, ys) == MapSeq(f, xs + ys)
+{
+  if |xs| == 0 {
+    assert MapSeq(f, []) + MapSeq(f, ys) == MapSeq(f, ys);
+  } else {
+    var xs := xs[1..];
+    MapSeqHomomorphism(f, xs, ys);
+  }
+}
+
+lemma MapSeqSplit<A,B>(n: nat, f: A -> B, xs: seq<A>)
+  requires forall a :: f.reads(a) == {}
+  requires forall a | a in xs :: f.requires(a)
+  requires n < |xs|
+  ensures  MapSeq(f, xs)[..n] == MapSeq(f, xs[..n])
+  ensures  MapSeq(f, xs)[n..] == MapSeq(f, xs[n..])
+{
+}
+
 function method ZipSeq<A,B>(xs: seq<A>, ys: seq<B>): seq<(A, B)>
   requires |xs| == |ys|
   ensures  |xs| == |ys| == |ZipSeq(xs, ys)|

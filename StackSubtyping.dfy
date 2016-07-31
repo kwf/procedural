@@ -25,6 +25,14 @@ lemma PrefixTransitive<A(==)>(r: seq<A>, s: seq<A>, t: seq<A>)
 {
 }
 
+lemma PrefixSplit<A(==)>(n: nat, xs: seq<A>, ys: seq<A>)
+  requires n < |xs|
+  requires Prefix(xs, ys)
+  ensures  Prefix(xs[..n], ys[..n])
+  ensures  Prefix(xs[n..], ys[n..])
+{
+}
+
 predicate method SubPhiSigned(p: bool, s: Phi, t: Phi)
   decreases s, t
 {
@@ -152,4 +160,20 @@ lemma SubPhiFlip(s: Phi, t: Phi)
   } else {
     SubPhiFlipSigned(false, t, s);
   }
+}
+
+lemma SubPhiSplit(n: nat, Phi1: Phi, Phi2: Phi)
+  requires n < |Phi1.out|
+  requires SubPhi(Phi1, Phi2)
+  ensures  SubPhi(MkPhi(Phi1.out[..n]), MkPhi(Phi2.out[..n]))
+  ensures  SubPhi(MkPhi(Phi1.out[n..]), MkPhi(Phi2.out[n..]))
+{
+}
+
+lemma SubPhiJoin(Phi1a: Phi, Phi1b: Phi, Phi2a: Phi, Phi2b: Phi)
+  requires SubPhi(Phi1a, Phi2a)
+  requires SubPhi(Phi1b, Phi2b)
+  requires |Phi1a.out| == |Phi2a.out|
+  ensures  SubPhi(MkPhi(Phi1a.out + Phi1b.out), MkPhi(Phi2a.out + Phi2b.out))
+{
 }

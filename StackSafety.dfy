@@ -61,8 +61,8 @@ lemma ProgressMath(o: MathOp, v1: int, v2: int)
       }
 }
 
-lemma ProgressOperation(o: operation, s: sigma)
-  requires exists t: Type :: TypeOperation(o) == (TypeSigma(s), t)
+lemma SafetyOperation(o: operation, s: sigma)
+  requires TypeOperation(o).0 == TypeSigma(s)
   ensures exists v :: StepOperation(o, s, v) && TypeValue(v) == TypeOperation(o).1
 {
   match o
@@ -90,11 +90,11 @@ lemma ProgressOperation(o: operation, s: sigma)
           assert StepOperation(binary(RelOp(o)), s, boolean(v));
 }
 
-lemma ProgressCommand(c: command, s: sigma, S: Sigma)
+lemma SafetyCommand(c: command, s: sigma, S: Sigma)
   requires Prefix(S, TypeSigma(s))
   requires exists S' :: TypeCommand(c, S) == Just(S')
-  ensures  exists s' :: StepCommand(c, s, s')
-                  //&& Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'))
+  ensures  exists s' :: StepCommand(c, s, s') &&
+                  Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'))
 {
   match c
     case pop(n) =>
@@ -106,9 +106,104 @@ lemma ProgressCommand(c: command, s: sigma, S: Sigma)
     case apply(n, o) =>
       var (So, t) := TypeOperation(o);
       assert TypeSigma(s[..n]) == So;
-      ProgressOperation(o, s[..n]);
-      var v :| StepOperation(o, s[..n], v);
+      SafetyOperation(o, s[..n]);
+      var v :| StepOperation(o, s[..n], v) && TypeValue(v) == TypeOperation(o).1;
       assert StepCommand(c, s, [v] + s[n..]);
+}
+
+lemma PreservationJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi: phi, phi': phi, b': block)
+  requires TypeProgram(SigmaH, D, d)
+  requires TypeJump(D, SigmaH, j, Phi)
+  requires ValidStack(D, phi)
+  requires SubPhi(Phi, TypePhi(D, phi))
+  requires StepJump(d, j, phi, phi', b')
+  requires j != halt
+  ensures  TypeBlock(D, SigmaH, b', TypePhi(D, phi'))
+{
+  match j
+
+    case goto(nu) =>
+
+      SubPhiTransitive(D[nu], Phi, TypePhi(D, phi));
+      TypeBlockExpansion(D, SigmaH, d[nu], D[nu], TypePhi(D, phi));
+
+    case branch(nu1, nu2) =>
+
+      var nu := phi[0].0;
+      var s  := phi[0].1;
+      var b  := s[0].getBoolean;
+      var nuJ := if b then nu1 else nu2;
+      var phi' := [(nu, s[1..])] + phi[1..];
+      var (PhiR, S) := Phi.out[0];
+      var Phi' := MkPhi([(PhiR, S[1..])] + Phi.out[1..]);
+      SubPhiTransitive(D[nuJ], Phi', TypePhi(D, phi'));
+      TypeBlockExpansion(D, SigmaH, d[nuJ], D[nuJ], TypePhi(D, phi'));
+
+    case call(n, nuJ, nuR) =>
+
+      var nu := phi[0].0;
+      var s  := phi[0].1;
+      var (s1, s2) := Split(n, s);
+      var (PhiR, S) := Phi.out[0];
+      var (S1, S2) := Split(n, S);
+
+      // Eventual Phi required by the call
+      var Phi' := MkPhi([(D[nuR], S1), (PhiR, S2)] + Phi.out[1..]);
+
+      // Connecting split types to split values
+      // We split the Sigmas and sigmas, and we want to ensure they're still prefixes
+      assert Prefix(S, TypeSigma(s));
+      calc {
+        Prefix(S, TypeSigma(s));
+        Prefix(S1 + S2, TypeSigma(s)[..n] + TypeSigma(s)[n..]);
+        { PrefixSplit(n, S, TypeSigma(s)); }
+        Prefix(S1, TypeSigma(s)[..n]) && Prefix(S2, TypeSigma(s)[n..]);
+        { MapSeqSplit(n, TypeValue, s); }
+        Prefix(S1, TypeSigma(s1)) && Prefix(S2, TypeSigma(s2));
+      }
+      assert Prefix(S1, TypeSigma(s1));
+      assert Prefix(S2, TypeSigma(s2));
+
+      // This proof segment is tricky:
+      // If we add a MkPhi to every line in the calc, it doesn't work
+      // All we're doing here is unfolding TypePhi(D, thephi) completely
+      var thephi := [(nuR, s1), (nu, s2)];
+      calc {
+        TypePhi(D, thephi).out;
+        MapSeq(TypeFrame(D), thephi);
+        { assert forall i | 0 <= i < |thephi| ::
+          MapSeq(TypeFrame(D), thephi)[i] ==
+          TypeFrame(D)(thephi[i]); }
+        [TypeFrame(D)(thephi[0]), TypeFrame(D)(thephi[1])];
+        [(D[nuR], TypeSigma(s1)), (D[nu], TypeSigma(s2))];
+      }
+      assert TypePhi(D, thephi) ==
+        MkPhi([(D[nuR], TypeSigma(s1)), (D[nu], TypeSigma(s2))]);
+
+      // Putting it all together
+      var Phi'01 := MkPhi(Phi'.out [0..2]);
+      var phi'01 := TypePhi(D, phi'[0..2]);
+      var Phi'n  := MkPhi(Phi'.out [2..]);
+      var phi'n  := TypePhi(D, phi'[2..]);
+      assert SubPhi(D[nu], PhiR);
+      SubPhiReflexive(D[nuR]);
+      assert SubPhi(Phi'01, phi'01);  // <-- all this proof effort above, to show this line
+      assert SubPhi(Phi'n,  phi'n);
+      calc {
+        SubPhi(Phi'01, phi'01) && SubPhi(Phi'n, phi'n);
+        { SubPhiJoin(Phi'01, Phi'n, phi'01, phi'n); }
+        SubPhi(MkPhi(Phi'01.out + Phi'n.out), MkPhi(phi'01.out + phi'n.out));
+        SubPhi(Phi', MkPhi(phi'01.out + phi'n.out));
+        { MapSeqHomomorphism(TypeFrame(D), phi'[0..2], phi'[2..]); }
+        SubPhi(Phi', TypePhi(D, phi'));
+      }
+      assert SubPhi(Phi', TypePhi(D, phi'));  // <-- and all that to show this
+      assert SubPhi(D[nuJ], Phi');  // which when we combine it with this...
+
+      SubPhiTransitive(D[nuJ], Phi', TypePhi(D, phi'));  // ...lets us say this
+      TypeBlockExpansion(D, SigmaH, d[nuJ], D[nuJ], TypePhi(D, phi'));
+
+    case ret(n) =>
 }
 
 lemma ProgressJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi: phi)
@@ -118,7 +213,6 @@ lemma ProgressJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi: ph
   requires SubPhi(Phi, TypePhi(D, phi))
   requires j != halt
   ensures  exists phi', b' :: StepJump(d, j, phi, phi', b')
-                        //&& TypeBlock(D, SigmaH, b', TypePhi(D, phi'))
 {
   match j
     case goto(nu) =>
@@ -127,12 +221,20 @@ lemma ProgressJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi: ph
       var nu := phi[0].0;
       var s  := phi[0].1;
       var b  := s[0].getBoolean;
-      assert StepJump(d, j, phi, [(nu, s[1..])] + phi[1..], d[if b then nu1 else nu2]);
+      var nuJ := if b then nu1 else nu2;
+      var phi' := [(nu, s[1..])] + phi[1..];
+      var (PhiR, S) := Phi.out[0];
+      var Phi' := MkPhi([(PhiR, S[1..])] + Phi.out[1..]);
+      assert StepJump(d, j, phi, phi', d[nuJ]);
     case call(n, nuJ, nuR) =>
       var nu := phi[0].0;
       var s  := phi[0].1;
       var (s1, s2) := Split(n, s);
-      assert StepJump(d, j, phi, [(nuR, s1), (nu, s2)] + phi[1..], d[nuJ]);
+      var (PhiR, S) := Phi.out[0];
+      var (S1, S2) := Split(n, S);
+      var phi' := [(nuR, s1), (nu, s2)] + phi[1..];
+      var Phi' := MkPhi([(D[nuR], S1), (PhiR, S2)] + Phi.out[1..]);
+      assert StepJump(d, j, phi, phi', d[nuJ]);
     case ret(n) =>
       var nuR := phi[0].0;
       var s_check := phi[0].1[..n];
@@ -155,7 +257,7 @@ lemma ProgressBlock(SigmaH: Sigma, D: Delta, d: delta, b: block, Phi: Phi, phi: 
       var nu := phi[0].0;
       var s := phi[0].1;
       var S := Phi.out[0].1;
-      ProgressCommand(c, s, S);
+      SafetyCommand(c, s, S);
       var s' :| StepCommand(c, s, s');
       assert StepBlock(d, b, phi, phi[0 := (nu, s')], (cs, j));
     case Nil =>
