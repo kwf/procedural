@@ -293,6 +293,76 @@ lemma PreservationJumpCall(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi,
   TypeBlockExpansion(D, SigmaH, d[nuJ], D[nuJ], TypePhi(D, phi'));  // boom.
 }
 
+lemma PreservationJumpRet(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi: phi, phi': phi, b': block)
+  requires TypeProgram(SigmaH, D, d)
+  requires TypeJump(D, SigmaH, j, Phi)
+  requires ValidStack(D, phi)
+  requires SubPhi(Phi, TypePhi(D, phi))
+  requires StepJump(d, j, phi, phi', b')
+  requires j.ret?
+  ensures  TypeBlock(D, SigmaH, b', TypePhi(D, phi'))
+{
+  match j case ret(n) =>
+
+  var nuR         := phi    [0].0;
+  var PhiR        := Phi.out[0].0;
+  var s_check     := phi    [0].1[..n];
+  var S_check     := Phi.out[0].1[..n];
+  var nu          := phi    [1].0;
+  var PhiR_origin := Phi.out[1].0;
+  var s_origin    := phi    [1].1;
+  var S_origin    := Phi.out[1].1;
+
+  var Phi' := MkPhi([(PhiR_origin, S_check + S_origin)] + Phi.out[2..]);
+
+  assert SubPhi(PhiR, Phi');
+  assert SubPhi(D[nuR], PhiR);
+  SubPhiTransitive(D[nuR], PhiR, Phi');
+
+  calc {
+    TypePhi(D, [(nu, s_check + s_origin)]).out;
+    [(D[nu], TypeSigma(s_check + s_origin))];
+    { MapSeqHomomorphism(TypeValue, s_check, s_origin); }
+    [(D[nu], TypeSigma(s_check) + TypeSigma(s_origin))];
+  }
+
+  // Putting it all together
+  var Phi'0 := MkPhi(Phi'.out [0..1]);
+  var phi'0 := TypePhi(D, phi'[0..1]);
+  var Phi'n := MkPhi(Phi'.out [1..]);
+  var phi'n := TypePhi(D, phi'[1..]);
+
+  assert SubPhi(Phi'0, phi'0);
+
+  calc {
+    SubPhi(Phi, TypePhi(D, phi));
+    { SubPhiSplit(1, Phi, TypePhi(D, phi)); }
+    SubPhi(Phi'n, MkPhi(TypePhi(D, phi).out[2..]));
+    SubPhi(Phi'n, MkPhi(MapSeq(TypeFrame(D), phi)[2..]));
+    { MapSeqSplit(1, TypeFrame(D), phi); }
+    SubPhi(Phi'n, MkPhi(MapSeq(TypeFrame(D), phi[2..])));
+    SubPhi(Phi'n, TypePhi(D, phi[2..]));
+    { assert phi[2..] == phi'[1..]; }
+    SubPhi(Phi'n, TypePhi(D, phi'[1..]));
+    SubPhi(Phi'n, phi'n);
+  }
+  assert SubPhi(Phi'n, phi'n);
+
+  // Assembling the final SubPhi proof: Phi' <: TypePhi(D, phi')
+  calc {
+    SubPhi(Phi'0, phi'0) && SubPhi(Phi'n, phi'n);
+    { SubPhiJoin(Phi'0, Phi'n, phi'0, phi'n); }
+    SubPhi(MkPhi(Phi'0.out + Phi'n.out), MkPhi(phi'0.out + phi'n.out));
+    SubPhi(Phi', MkPhi(phi'0.out + phi'n.out));
+    { MapSeqHomomorphism(TypeFrame(D), phi'[0..1], phi'[1..]); }
+    SubPhi(Phi', TypePhi(D, phi'));
+  }
+  assert SubPhi(Phi', TypePhi(D, phi'));
+
+  SubPhiTransitive(D[nuR], Phi', TypePhi(D, phi'));
+  TypeBlockExpansion(D, SigmaH, d[nuR], D[nuR], TypePhi(D, phi'));
+}
+
 lemma PreservationJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi: phi, phi': phi, b': block)
   requires TypeProgram(SigmaH, D, d)
   requires TypeJump(D, SigmaH, j, Phi)
@@ -310,4 +380,5 @@ lemma PreservationJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi
     case call(n, nuJ, nuR) =>
       PreservationJumpCall(SigmaH, D, d, j, Phi, phi, phi', b');
     case ret(n) =>
+      PreservationJumpRet(SigmaH, D, d, j, Phi, phi, phi', b');
 }
