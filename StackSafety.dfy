@@ -63,11 +63,16 @@ lemma ProgressMath(o: MathOp, v1: int, v2: int)
       }
 }
 
-// PROGRESS / PRESERVATION: OPERATIONS & COMMANDS
+// PRESERVATION: OPERATIONS & COMMANDS
 
-lemma SafetyOperation(o: operation, s: sigma)
+//  operations ensure: TypeValue(v) == TypeOperation(o).1
+//  commands ensure:   Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'))
+
+// PROGRESS: OPERATIONS & COMMANDS
+
+lemma ProgressOperation(o: operation, s: sigma)
   requires TypeOperation(o).0 == TypeSigma(s)
-  ensures exists v :: StepOperation(o, s, v) && TypeValue(v) == TypeOperation(o).1
+  ensures exists v :: StepOperation(o, s, v)
 {
   match o
     case not =>
@@ -94,11 +99,10 @@ lemma SafetyOperation(o: operation, s: sigma)
           assert StepOperation(binary(RelOp(o)), s, boolean(v));
 }
 
-lemma SafetyCommand(c: command, s: sigma, S: Sigma)
+lemma ProgressCommand(c: command, s: sigma, S: Sigma)
   requires Prefix(S, TypeSigma(s))
   requires exists S' :: TypeCommand(c, S) == Just(S')
-  ensures  exists s' :: StepCommand(c, s, s') &&
-                  Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'))
+  ensures  exists s' :: StepCommand(c, s, s')
 {
   match c
     case pop(n) =>
@@ -110,7 +114,7 @@ lemma SafetyCommand(c: command, s: sigma, S: Sigma)
     case apply(n, o) =>
       var (So, t) := TypeOperation(o);
       assert TypeSigma(s[..n]) == So;
-      SafetyOperation(o, s[..n]);
+      ProgressOperation(o, s[..n]);
       var v :| StepOperation(o, s[..n], v) && TypeValue(v) == TypeOperation(o).1;
       assert StepCommand(c, s, [v] + s[n..]);
 }
@@ -170,7 +174,7 @@ lemma ProgressBlock(SigmaH: Sigma, D: Delta, d: delta, b: block, Phi: Phi, phi: 
       var nu := phi[0].0;
       var s := phi[0].1;
       var S := Phi.out[0].1;
-      SafetyCommand(c, s, S);
+      ProgressCommand(c, s, S);
       var s' :| StepCommand(c, s, s');
       assert StepBlock(d, b, phi, phi[0 := (nu, s')], (cs, j));
     case Nil =>
@@ -369,7 +373,6 @@ lemma PreservationJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi
   requires ValidStack(D, phi)
   requires SubPhi(Phi, TypePhi(D, phi))
   requires StepJump(d, j, phi, phi', b')
-  requires j != halt
   ensures  TypeBlock(D, SigmaH, b', TypePhi(D, phi'))
 {
   match j
@@ -382,3 +385,28 @@ lemma PreservationJump(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Phi, phi
     case ret(n) =>
       PreservationJumpRet(SigmaH, D, d, j, Phi, phi, phi', b');
 }
+
+// lemma PreservationBlock(SigmaH: Sigma, D: Delta, d: delta, b: block, Phi: Phi, phi: phi, phi': phi, b': block)
+//   requires TypeProgram(SigmaH, D, d)
+//   requires TypeBlock(D, SigmaH, b, Phi)
+//   requires ValidStack(D, phi)
+//   requires SubPhi(Phi, TypePhi(D, phi))
+//   requires StepBlock(d, b, phi, phi', b')
+//   ensures  TypeBlock(D, SigmaH, b', TypePhi(D, phi'))
+// {
+//   var (cs, j) := b;
+//   match cs
+//     case Cons(c, cs) =>
+//       var nu := phi[0].0;
+//       var s := phi[0].1;
+//       var S := Phi.out[0].1;
+//       SafetyCommand(c, s, S);
+//       var s' :| StepCommand(c, s, s') && Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'));
+//       assert TypeBlock(D, SigmaH, b', TypePhi(D, phi'));
+//     case Nil =>
+//       if j != halt {
+//         ProgressJump(SigmaH, D, d, j, Phi, phi);
+//         var phi', b' :| StepJump(d, j, phi, phi', b');
+//         assert StepBlock(d, b, phi, phi', b');
+//       }
+// }
