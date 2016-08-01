@@ -19,6 +19,7 @@ predicate method StepOperation(o: operation, s: sigma, v: value)
       |s| == 0 &&
       TypeValue(v) == t
     case printf(format) =>
+      v == unit &&
       var types := SeqFromList(Lefts(format));
       |s| == |types| &&
       forall i | 0 <= i < |s| :: TypeValue(s[i]) == types[i]

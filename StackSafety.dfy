@@ -63,11 +63,6 @@ lemma ProgressMath(o: MathOp, v1: int, v2: int)
       }
 }
 
-// PRESERVATION: OPERATIONS & COMMANDS
-
-//  operations ensure: TypeValue(v) == TypeOperation(o).1
-//  commands ensure:   Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'))
-
 // PROGRESS: OPERATIONS & COMMANDS
 
 lemma ProgressOperation(o: operation, s: sigma)
@@ -101,7 +96,7 @@ lemma ProgressOperation(o: operation, s: sigma)
 
 lemma ProgressCommand(c: command, s: sigma, S: Sigma)
   requires Prefix(S, TypeSigma(s))
-  requires exists S' :: TypeCommand(c, S) == Just(S')
+  requires TypeCommand(c, S).Just?
   ensures  exists s' :: StepCommand(c, s, s')
 {
   match c
@@ -117,6 +112,40 @@ lemma ProgressCommand(c: command, s: sigma, S: Sigma)
       ProgressOperation(o, s[..n]);
       var v :| StepOperation(o, s[..n], v) && TypeValue(v) == TypeOperation(o).1;
       assert StepCommand(c, s, [v] + s[n..]);
+}
+
+// PRESERVATION: OPERATIONS & COMMANDS
+
+lemma PreservationOperation(o: operation, s: sigma, v: value)
+  requires TypeOperation(o).0 == TypeSigma(s)
+  requires StepOperation(o, s, v)
+  ensures  TypeValue(v) == TypeOperation(o).1
+{
+  match o
+    case not =>
+    case const(x) =>
+    case read(t) =>
+    case binary(o) =>
+    case printf(format) =>
+      assert TypeOperation(o).1 == Unit;
+      assume false; // TODO: Why does it not see that v == unit?
+      assert v == unit;
+}
+
+lemma PreservationCommand(c: command, s: sigma, S: Sigma, s': sigma)
+  requires Prefix(S, TypeSigma(s))
+  requires TypeCommand(c, S).Just?
+  requires StepCommand(c, s, s')
+  ensures  Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'))
+{
+  match c
+    case pop(n) =>
+    case load(n) =>
+    case store(n) =>
+    case apply(n, o) =>
+      forall v | StepOperation(o, s[..n], v) {
+        PreservationOperation(o, s[..n], v);
+  }
 }
 
 // PROGRESS: JUMPS
@@ -397,7 +426,12 @@ lemma PreservationBlock(SigmaH: Sigma, D: Delta, d: delta, b: block, Phi: Phi, p
   var (cs, j) := b;
   match cs
     case Cons(c, cs) =>
-      assume false; // TODO: Insert preservation lemma for commands here!
+      var s  := phi[0].1;
+      var S  := Phi.out[0].1;
+      var s' := phi'[0].1;
+      PreservationCommand(c, s, S, s');
+      assert Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'));
+      assume false; // TODO: Fix this -- should require a calc statement to unfold things
       assert TypeBlock(D, SigmaH, b', TypePhi(D, phi'));
     case Nil =>
       if j != halt {
