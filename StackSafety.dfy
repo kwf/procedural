@@ -426,13 +426,14 @@ lemma PreservationBlock(SigmaH: Sigma, D: Delta, d: delta, b: block, Phi: Phi, p
   var (cs, j) := b;
   match cs
     case Cons(c, cs) =>
-      var s  := phi[0].1;
-      var S  := Phi.out[0].1;
-      var s' := phi'[0].1;
+      var s    := phi[0].1;
+      var PhiR := Phi.out[0].0;
+      var S    := Phi.out[0].1;
+      var s'   := phi'[0].1;
+      var S'   := TypeCommand(c, S).FromJust;
+      var Phi' := MkPhi([(PhiR, S')] + Phi.out[1..]);
       PreservationCommand(c, s, S, s');
-      assert Prefix(TypeCommand(c, S).FromJust, TypeSigma(s'));
-      assume false; // TODO: Fix this -- should require a calc statement to unfold things
-      assert TypeBlock(D, SigmaH, b', TypePhi(D, phi'));
+      TypeBlockExpansion(D, SigmaH, b', Phi', TypePhi(D, phi'));
     case Nil =>
       if j != halt {
         PreservationJump(SigmaH, D, d, j, Phi, phi, phi', b');
