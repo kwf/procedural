@@ -128,7 +128,6 @@ lemma PreservationOperation(o: operation, s: sigma, v: value)
     case binary(o) =>
     case printf(format) =>
       assert TypeOperation(o).1 == Unit;
-      assume false; // TODO: Why does it not see that v == unit?
       assert v == unit;
 }
 
@@ -145,7 +144,7 @@ lemma PreservationCommand(c: command, s: sigma, S: Sigma, s': sigma)
     case apply(n, o) =>
       forall v | StepOperation(o, s[..n], v) {
         PreservationOperation(o, s[..n], v);
-  }
+      }
 }
 
 // PROGRESS: JUMPS
@@ -249,6 +248,8 @@ lemma PreservationJumpBranch(SigmaH: Sigma, D: Delta, d: delta, j: jump, Phi: Ph
   var phi' := [(nu, s[1..])] + phi[1..];
   var (PhiR, S) := Phi.out[0];
   var Phi' := MkPhi([(PhiR, S[1..])] + Phi.out[1..]);
+  assert SubPhi(D[nuJ], Phi');
+  assert SubPhi(Phi', TypePhi(D, phi'));
   SubPhiTransitive(D[nuJ], Phi', TypePhi(D, phi'));
   TypeBlockExpansion(D, SigmaH, d[nuJ], D[nuJ], TypePhi(D, phi'));
 }

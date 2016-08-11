@@ -1,4 +1,4 @@
-function Max(x: int, y: int): int
+function method Max(x: int, y: int): int
 {
   if x > y then x else y
 }
