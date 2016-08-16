@@ -104,8 +104,13 @@ class Parser {
       return false;
     }
   }
-  method Error(msg: string) {
-    print "Error at token ", p, ": ", msg, "\n";
+  method Error(msg: string)
+  {
+    print "Error at token ", p;
+    if stringTokens != null && 0 <= p < stringTokens.Length {
+      print "('", stringTokens[p], "')";
+    }
+    print ": ", msg, "\n";
   }
 
   method Parse() returns (success: bool, prog: Program)

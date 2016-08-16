@@ -1,5 +1,6 @@
 include "SourceScanner.dfy"
 include "SourceParser.dfy"
+include "SourcePrinter.dfy"
 
 extern "InputRead"
 method InputRead() returns (input: array<char>)
@@ -15,7 +16,8 @@ method Main()
   var success, prog := parser.Parse();
   if success {
     print "Parse succeeded!\n";
-    print prog, "\n";  // this may not be pretty
+    var pr := new SourcePrinter;
+    pr.PrintProgram(prog);
   } else {
     print "Parse failed :(\n";
   }
