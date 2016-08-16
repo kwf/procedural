@@ -176,50 +176,76 @@ function method Rights<A,B>(es: List<Either<A,B>>): List<B> {
     case Cons(Right(r), es') => Cons(r, Rights(es'))
 }
 
-function method MapSeq<A,B>(f: A -> B, xs: seq<A>): seq<B>
-  requires forall a :: f.reads(a) == {}
-  requires forall a | a in xs :: f.requires(a)
-  ensures |xs| == |MapSeq(f, xs)|
-  ensures forall i | 0 <= i < |xs| :: MapSeq(f, xs)[i] == f(xs[i])
+function method Nth<A>(n: nat, xs: List<A>): A
+  requires n < Length(xs)
 {
-  if |xs| == 0 then [] else
-    var x  := xs[0];
-    var xs := xs[1..];
-    [f(x)] + MapSeq(f, xs)
+  match xs
+    case Cons(x, xs) =>
+      if 0 < n then Nth(n - 1, xs) else x
 }
 
-lemma MapSeqHomomorphism<A,B>(f: A -> B, xs: seq<A>, ys: seq<A>)
-  requires forall a :: f.reads(a) == {}
-  requires forall a | a in xs :: f.requires(a)
-  requires forall a | a in ys :: f.requires(a)
-  ensures MapSeq(f, xs) + MapSeq(f, ys) == MapSeq(f, xs + ys)
+function method Take<A>(n: nat, xs: List<A>): List<A>
 {
-  if |xs| == 0 {
-    assert MapSeq(f, []) + MapSeq(f, ys) == MapSeq(f, ys);
-  } else {
-    var xs := xs[1..];
-    MapSeqHomomorphism(f, xs, ys);
-  }
+  if n != 0
+     then match xs
+       case Nil => Nil
+       case Cons(x, xs) => Cons(x, Take(n - 1, xs))
+     else xs
 }
 
-lemma MapSeqSplit<A,B>(n: nat, f: A -> B, xs: seq<A>)
-  requires forall a :: f.reads(a) == {}
-  requires forall a | a in xs :: f.requires(a)
-  requires n < |xs|
-  ensures  MapSeq(f, xs)[..n] == MapSeq(f, xs[..n])
-  ensures  MapSeq(f, xs)[n..] == MapSeq(f, xs[n..])
+function method Drop<A>(n: nat, xs: List<A>): List<A>
 {
+  if n != 0
+     then match xs
+        case Nil => Nil
+        case Cons(_, xs) => Drop(n - 1, xs)
+     else xs
 }
 
-function method ZipSeq<A,B>(xs: seq<A>, ys: seq<B>): seq<(A, B)>
-  requires |xs| == |ys|
-  ensures  |xs| == |ys| == |ZipSeq(xs, ys)|
-  ensures forall i | 0 <= i < |xs| :: ZipSeq(xs, ys)[i] == (xs[i], ys[i])
-{
-  if |xs| == 0 then [] else
-    var x  := xs[0];
-    var y  := ys[0];
-    var xs := xs[1..];
-    var ys := ys[1..];
-    [(x, y)] + ZipSeq(xs, ys)
-}
+// function method MapSeq<A,B>(f: A -> B, xs: seq<A>): seq<B>
+//   requires forall a :: f.reads(a) == {}
+//   requires forall a | a in xs :: f.requires(a)
+//   ensures |xs| == |MapSeq(f, xs)|
+//   ensures forall i | 0 <= i < |xs| :: MapSeq(f, xs)[i] == f(xs[i])
+// {
+//   if |xs| == 0 then [] else
+//     var x  := xs[0];
+//     var xs := xs[1..];
+//     [f(x)] + MapSeq(f, xs)
+// }
+
+// lemma MapSeqHomomorphism<A,B>(f: A -> B, xs: seq<A>, ys: seq<A>)
+//   requires forall a :: f.reads(a) == {}
+//   requires forall a | a in xs :: f.requires(a)
+//   requires forall a | a in ys :: f.requires(a)
+//   ensures MapSeq(f, xs) + MapSeq(f, ys) == MapSeq(f, xs + ys)
+// {
+//   if |xs| == 0 {
+//     assert MapSeq(f, []) + MapSeq(f, ys) == MapSeq(f, ys);
+//   } else {
+//     var xs := xs[1..];
+//     MapSeqHomomorphism(f, xs, ys);
+//   }
+// }
+
+// lemma MapSeqSplit<A,B>(n: nat, f: A -> B, xs: seq<A>)
+//   requires forall a :: f.reads(a) == {}
+//   requires forall a | a in xs :: f.requires(a)
+//   requires n < |xs|
+//   ensures  MapSeq(f, xs)[..n] == MapSeq(f, xs[..n])
+//   ensures  MapSeq(f, xs)[n..] == MapSeq(f, xs[n..])
+// {
+// }
+
+// function method ZipSeq<A,B>(xs: seq<A>, ys: seq<B>): seq<(A, B)>
+//   requires |xs| == |ys|
+//   ensures  |xs| == |ys| == |ZipSeq(xs, ys)|
+//   ensures forall i | 0 <= i < |xs| :: ZipSeq(xs, ys)[i] == (xs[i], ys[i])
+// {
+//   if |xs| == 0 then [] else
+//     var x  := xs[0];
+//     var y  := ys[0];
+//     var xs := xs[1..];
+//     var ys := ys[1..];
+//     [(x, y)] + ZipSeq(xs, ys)
+// }

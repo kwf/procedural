@@ -4,11 +4,11 @@ include "Common.dfy"
 
 type nu = Id
 
-type Sigma = seq<Type>
-type sigma = seq<value>
+type Sigma = List<Type>
+type sigma = List<value>
 
-datatype Phi = MkPhi(out: seq<(Phi, Sigma)>)
-type phi = seq<(nu, sigma)>
+datatype Phi = MkPhi(out: List<(Phi, Sigma)>)
+type phi = List<(nu, sigma)>
 
 type Delta = map<nu, Phi>
 type delta = map<nu, block>

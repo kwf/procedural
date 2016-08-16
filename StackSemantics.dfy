@@ -70,10 +70,10 @@ predicate method StepJump(d: delta, j: jump, phi: phi, phi': phi, b: block)
       b == d[nu]
     case branch(nu1, nu2) =>
       nu1 in d && nu2 in d &&
-      0 < |phi| == |phi'| &&
-      var nu := phi[0].0;
-      var s := phi[0].1;
-      0 < |s| &&
+      0 < Length(phi) == Length(phi') &&
+      var nu := Nth(0, phi).0;
+      var s := Nth(0, phi).1;
+      0 < Length(s) &&
       phi' == [(nu, s[1..])] + phi[1..] &&
       s[0].boolean? &&
       b == d[if s[0].getBoolean then nu1 else nu2]
