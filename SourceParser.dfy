@@ -1,9 +1,5 @@
 include "SourceSyntax.dfy"
 
-extern "SourceScanner.Read"
-method SourceScannerRead() returns (stringTokens: array<string>)
-  ensures stringTokens != null
-
 function method IdToString(id: Id): string
 {
   if id <= 0 then "0" else
@@ -61,11 +57,12 @@ class Parser {
     stringTokens != null &&
     p <= stringTokens.Length
   }
-  constructor ()
+  constructor (tokens: array<string>)
+    requires tokens != null
     modifies this
     ensures Valid()
   {
-    stringTokens := SourceScannerRead();
+    stringTokens := tokens;
     p := 0;
   }
   function method Next(): string
@@ -107,8 +104,13 @@ class Parser {
       return false;
     }
   }
-  method Error(msg: string) {
-    print "Error at token ", p, ": ", msg, "\n";
+  method Error(msg: string)
+  {
+    print "Error at token ", p;
+    if stringTokens != null && 0 <= p < stringTokens.Length {
+      print "('", stringTokens[p], "')";
+    }
+    print ": ", msg, "\n";
   }
 
   method Parse() returns (success: bool, prog: Program)
