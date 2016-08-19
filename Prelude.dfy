@@ -202,6 +202,14 @@ function method Drop<A>(n: nat, xs: List<A>): List<A>
      else xs
 }
 
+function method Append<A>(xs: List<A>, ys: List<A>): List<A>
+  ensures Length(Append(xs, ys)) == Length(xs) + Length(ys)
+{
+  match xs
+    case Nil => ys
+    case Cons(x, xs) => Cons(x, Append(xs, ys))
+}
+
 // function method MapSeq<A,B>(f: A -> B, xs: seq<A>): seq<B>
 //   requires forall a :: f.reads(a) == {}
 //   requires forall a | a in xs :: f.requires(a)

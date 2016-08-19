@@ -74,17 +74,17 @@ predicate method StepJump(d: delta, j: jump, phi: phi, phi': phi, b: block)
       var nu := Nth(0, phi).0;
       var s := Nth(0, phi).1;
       0 < Length(s) &&
-      phi' == [(nu, s[1..])] + phi[1..] &&
-      s[0].boolean? &&
-      b == d[if s[0].getBoolean then nu1 else nu2]
+      phi' == Cons((nu, Drop(1, s)), Drop(1, phi)) &&
+      Nth(0, s).boolean? &&
+      b == d[if Nth(0, s).getBoolean then nu1 else nu2]
     case call(n, nuJ, nuR) =>
       nuJ in d && nuR in d &&
-      0 < |phi| == |phi'| - 1 &&
-      var nu := phi[0].0;
-      var s := phi[0].1;
-      n <= |s| &&
+      0 < Length(phi) == Length(phi') - 1 &&
+      var nu := Nth(0, phi).0;
+      var s := Nth(0, phi).1;
+      n <= Length(s) &&
       var (s1, s2) := Split(n, s);
-      phi' == [(nuR, s1), (nu, s2)] + phi[1..] &&
+      phi' == Cons((nuR, s1), Cons((nu, s2), Drop(1, phi))) &&
       b == d[nuJ]
     case ret(n) =>
       0 < |phi| - 1 == |phi'| &&
