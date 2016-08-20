@@ -178,10 +178,27 @@ function method Rights<A,B>(es: List<Either<A,B>>): List<B> {
 
 function method Nth<A>(n: nat, xs: List<A>): A
   requires n < Length(xs)
+  ensures Nth(n, xs) < xs
 {
   match xs
     case Cons(x, xs) =>
       if 0 < n then Nth(n - 1, xs) else x
+}
+
+lemma NthProperties<A>(xs: List<A>)
+  ensures xs != Nil ==> Nth(0, xs) == xs.Head && forall i | 0 <= i < Length(xs.Tail) :: Nth(i, xs.Tail) == Nth(i+1, xs)
+{
+  match xs
+  case Nil =>
+  case Cons(h, xs') => assert Nth(0, xs) == h;
+}
+
+lemma NthExtensionality<A>(xs: List<A>, ys: List<A>)
+  requires Length(xs) == Length(ys)
+  requires forall i | 0 <= i < Length(xs) :: Nth(i, xs) == Nth(i, ys)
+  ensures xs == ys
+{
+  NthProperties(xs);
 }
 
 function method ReplaceNth<A>(n: nat, xs: List<A>, a: A): List<A>
@@ -199,6 +216,24 @@ function method Take<A>(n: nat, xs: List<A>): List<A>
        case Nil => Nil
        case Cons(x, xs) => Cons(x, Take(n - 1, xs))
      else Nil
+}
+
+lemma TakeLength<A>(n: nat, xs: List<A>)
+  ensures Length(Take(n, xs)) <= n
+  ensures Length(Take(n, xs)) == n || Length(Take(n, xs)) == Length(xs)
+{
+}
+
+lemma NthTake<A>(n: nat, k: nat, xs: List<A>)
+  requires n < k <= Length(xs)
+  ensures (TakeLength(k, xs); Nth(n, Take(k, xs)) == Nth(n, xs))
+{
+  if n == 0 {
+    assert Nth(n, Take(k, xs)) == Take(k, xs).Head;
+  } else {
+    NthTake(n-1, k-1, xs);
+    TakeLength(k, xs);
+  }
 }
 
 function method Drop<A>(n: nat, xs: List<A>): List<A>

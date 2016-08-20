@@ -43,15 +43,7 @@ lemma PrefixProperty'<A(==)>(s: List<A>, t: List<A>)
   match s
   case Nil =>
   case Cons(h, s') =>
-    assert 1 <= 1 + Length(s') == Length(s) <= Length(t);
-    assert t.Cons?;
-    assert h == Nth(0, s) == Nth(0, t) == t.Head;
-    assert Length(s') <= Length(t.Tail);
-    forall i | 0 <= i < Length(s')
-      ensures Nth(i, s') == Nth(i, t.Tail)
-    {
-     assert Nth(i, s.Tail) == Nth(i+1, s);
-    }
+    NthProperties(s);
     PrefixProperty'(s', t.Tail);
 }
 
@@ -62,16 +54,10 @@ lemma PrefixReplace<A>(n: nat, s: List<A>, t: List<A>, a: A)
   ensures (PrefixProperty(s, t);
            Prefix(ReplaceNth(n, s, a), ReplaceNth(n, t, a)))
 {
-  assert s.Cons? && t.Cons?;
-  assert s.Head == t.Head;
-  assert Prefix(s.Tail, t.Tail);
   if n == 0 {
-    assert ReplaceNth(n, s, a) == Cons(a, s.Tail);
     assert ReplaceNth(n, t, a) == Cons(a, t.Tail);
   } else {
     PrefixProperty(s.Tail, t.Tail);
-    assert ReplaceNth(n, s, a) == Cons(s.Head, ReplaceNth(n-1, s.Tail, a));
-    assert ReplaceNth(n, t, a) == Cons(t.Head, ReplaceNth(n-1, t.Tail, a));
   }
 }
 
@@ -102,7 +88,16 @@ predicate method SubPhi(s: Phi, t: Phi)
 
 lemma SubPhiReflexiveSigned(p: bool, s: Phi)
   ensures SubPhiSigned(p, s, s) && SubPhiSigned(!p, s, s)
+  decreases s
 {
+  var s := s.out;
+  forall i | 0 <= i < Length(s)
+    ensures SubPhiSigned(!p, Nth(i, s).0, Nth(i, s).0)
+    ensures Prefix(Nth(i, s).1, Nth(i, s).1)
+  {
+    SubPhiReflexiveSigned(!p, Nth(i, s).0);
+    PrefixReflexive(Nth(i, s).1);
+  }
 }
 
 lemma SubPhiReflexive(s: Phi)
@@ -117,14 +112,14 @@ lemma SubPhiAntisymmetricSigned(p: bool, s: Phi, t: Phi)
   requires SubPhiSigned(!p, s, t)
   ensures  s == t
 {
-  var (s, t) := (s.out, t.out);
+  var s, t := s.out, t.out;
   forall i | 0 <= i < Length(s)
     ensures Nth(i, s) == Nth(i, t)
   {
     PrefixAntisymmetric(Nth(i, s).1, Nth(i, t).1);
     SubPhiAntisymmetricSigned(p, Nth(i, s).0, Nth(i, t).0);
   }
-  assert s == t;
+  NthExtensionality(s, t);
 }
 
 lemma SubPhiAntisymmetric(s: Phi, t: Phi)
@@ -142,9 +137,11 @@ lemma SubPhiTransitiveSigned(p: bool, r: Phi, s: Phi, t: Phi)
   requires SubPhiSigned(p, s, t)
   ensures  SubPhiSigned(p, r, t)
 {
-  var (r, s, t) := (r.out, s.out, t.out);
+  var r, s, t := r.out, s.out, t.out;
   forall i | 0 <= i < Length(if p then r else t)
-    ensures SubPhiSigned(!p, Nth(i, r).0, Nth(i, t).0);
+    ensures SubPhiSigned(!p, Nth(i, r).0, Nth(i, t).0)
+    ensures if p then Prefix(Nth(i, r).1, Nth(i, t).1)
+                 else Prefix(Nth(i, t).1, Nth(i, r).1)
   {
     if p {
       PrefixTransitive(Nth(i, r).1, Nth(i, s).1, Nth(i, t).1);
@@ -218,6 +215,31 @@ lemma SubPhiSplit(n: nat, Phi1: Phi, Phi2: Phi)
   ensures  SubPhi(MkPhi(Take(n, Phi1.out)), MkPhi(Take(n, Phi2.out)))
   ensures  SubPhi(MkPhi(Drop(n, Phi1.out)), MkPhi(Drop(n, Phi2.out)))
 {
+  if n == 0 {
+  } else {
+    var s', t' := Phi1.out.Tail, Phi2.out.Tail;
+    forall i | 0 <= i < Length(s')
+      ensures SubPhiSigned(false, Nth(i, s').0, Nth(i, t').0)
+      ensures Prefix(Nth(i, s').1, Nth(i, t').1)
+      ensures SubPhiSigned(true, Nth(i, t').0, Nth(i, s').0)
+      ensures Prefix(Nth(i, s').1, Nth(i, t').1)
+    {
+      assert Nth(i, s') == Nth(i+1, Phi1.out);
+    }
+
+    SubPhiSplit(n-1, MkPhi(Phi1.out.Tail), MkPhi(Phi2.out.Tail));
+
+    var m, k := Take(n, Phi1.out), Take(n, Phi2.out);
+    TakeLength(n, Phi1.out);
+    forall i | 0 <= i < Length(m)
+      ensures SubPhiSigned(false, Nth(i, m).0, Nth(i, k).0)
+      ensures Prefix(Nth(i, m).1, Nth(i, k).1)
+      ensures SubPhiSigned(true, Nth(i, k).0, Nth(i, m).0)
+      ensures Prefix(Nth(i, m).1, Nth(i, k).1)
+    {
+      NthTake(i, n, Phi1.out);
+    }
+  }
 }
 
 lemma SubPhiJoin(Phi1a: Phi, Phi1b: Phi, Phi2a: Phi, Phi2b: Phi)
