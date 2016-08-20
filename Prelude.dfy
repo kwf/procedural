@@ -184,13 +184,21 @@ function method Nth<A>(n: nat, xs: List<A>): A
       if 0 < n then Nth(n - 1, xs) else x
 }
 
+function method ReplaceNth<A>(n: nat, xs: List<A>, a: A): List<A>
+  requires n < Length(xs)
+{
+  match xs
+    case Cons(x, xs') =>
+      if n == 0 then Cons(a, xs') else Cons(x, ReplaceNth(n-1, xs', a))
+}
+
 function method Take<A>(n: nat, xs: List<A>): List<A>
 {
   if n != 0
      then match xs
        case Nil => Nil
        case Cons(x, xs) => Cons(x, Take(n - 1, xs))
-     else xs
+     else Nil
 }
 
 function method Drop<A>(n: nat, xs: List<A>): List<A>

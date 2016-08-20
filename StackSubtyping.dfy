@@ -2,8 +2,9 @@
 include "StackSyntax.dfy"
 
 predicate method Prefix<A(==)>(s: List<A>, t: List<A>) {
-  Length(s) <= Length(t) &&
-    forall i | 0 <= i < Length(s) :: Nth(i, s) == Nth(i, t)
+  match s
+  case Nil => true
+  case Cons(h, s') => t.Cons? && t.Head == h && Prefix(s', t.Tail)
 }
 
 lemma PrefixReflexive<A(==)>(s: List<A>)
@@ -25,11 +26,60 @@ lemma PrefixTransitive<A(==)>(r: List<A>, s: List<A>, t: List<A>)
 {
 }
 
+// The next two lemmas give an equivalent formulation of Prefix in terms of Length and Nth:
+
+lemma PrefixProperty<A(==)>(s: List<A>, t: List<A>)
+  requires Prefix(s, t)
+  ensures Length(s) <= Length(t) &&
+          forall i | 0 <= i < Length(s) :: Nth(i, s) == Nth(i, t)
+{
+}
+
+lemma PrefixProperty'<A(==)>(s: List<A>, t: List<A>)
+  requires Length(s) <= Length(t) &&
+           forall i | 0 <= i < Length(s) :: Nth(i, s) == Nth(i, t)
+  ensures Prefix(s, t)
+{
+  match s
+  case Nil =>
+  case Cons(h, s') =>
+    assert 1 <= 1 + Length(s') == Length(s) <= Length(t);
+    assert t.Cons?;
+    assert h == Nth(0, s) == Nth(0, t) == t.Head;
+    assert Length(s') <= Length(t.Tail);
+    forall i | 0 <= i < Length(s')
+      ensures Nth(i, s') == Nth(i, t.Tail)
+    {
+     assert Nth(i, s.Tail) == Nth(i+1, s);
+    }
+    PrefixProperty'(s', t.Tail);
+}
+
+// other lemmas about Prefix
+
+lemma PrefixReplace<A>(n: nat, s: List<A>, t: List<A>, a: A)
+  requires Prefix(s, t) && n < Length(s)
+  ensures (PrefixProperty(s, t);
+           Prefix(ReplaceNth(n, s, a), ReplaceNth(n, t, a)))
+{
+  assert s.Cons? && t.Cons?;
+  assert s.Head == t.Head;
+  assert Prefix(s.Tail, t.Tail);
+  if n == 0 {
+    assert ReplaceNth(n, s, a) == Cons(a, s.Tail);
+    assert ReplaceNth(n, t, a) == Cons(a, t.Tail);
+  } else {
+    PrefixProperty(s.Tail, t.Tail);
+    assert ReplaceNth(n, s, a) == Cons(s.Head, ReplaceNth(n-1, s.Tail, a));
+    assert ReplaceNth(n, t, a) == Cons(t.Head, ReplaceNth(n-1, t.Tail, a));
+  }
+}
+
 lemma PrefixSplit<A(==)>(n: nat, xs: List<A>, ys: List<A>)
-  requires n < Length(xs)
+  requires n <= Length(xs)
   requires Prefix(xs, ys)
   ensures  Prefix(Drop(n, xs), Drop(n, ys))
-  ensures  Prefix(Take(n, xs), Take(n, ys))
+  ensures  Take(n, xs) == Take(n, ys) && Prefix(Take(n, xs), Take(n, ys))
 {
 }
 
