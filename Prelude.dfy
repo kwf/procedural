@@ -253,6 +253,13 @@ function method Append<A>(xs: List<A>, ys: List<A>): List<A>
     case Cons(x, xs) => Cons(x, Append(xs, ys))
 }
 
+lemma NthAppend<A>(i: nat, xs: List<A>, ys: List<A>)
+  requires 0 <= i < Length(Append(xs, ys))
+  ensures i < Length(xs) ==> Nth(i, Append(xs, ys)) == Nth(i, xs)
+  ensures Length(xs) <= i ==> Nth(i, Append(xs, ys)) == Nth(i - Length(xs), ys)
+{
+}
+
 // function method MapSeq<A,B>(f: A -> B, xs: seq<A>): seq<B>
 //   requires forall a :: f.reads(a) == {}
 //   requires forall a | a in xs :: f.requires(a)

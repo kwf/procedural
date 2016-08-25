@@ -248,4 +248,16 @@ lemma SubPhiJoin(Phi1a: Phi, Phi1b: Phi, Phi2a: Phi, Phi2b: Phi)
   requires Length(Phi1a.out) == Length(Phi2a.out)
   ensures  SubPhi(MkPhi(Append(Phi1a.out, Phi1b.out)), MkPhi(Append(Phi2a.out, Phi2b.out)))
 {
+  var s := Append(Phi1a.out, Phi1b.out);
+  var t := Append(Phi2a.out, Phi2b.out);
+
+  assert Length(s) <= Length(t);
+  forall i | 0 <= i < Length(s)
+    ensures SubPhiSigned(false, Nth(i, s).0, Nth(i, t).0)
+    ensures SubPhiSigned(true, Nth(i, t).0, Nth(i, s).0)
+    ensures Prefix(Nth(i, s).1, Nth(i, t).1)
+  {
+    NthAppend(i, Phi1a.out, Phi1b.out);
+    NthAppend(i, Phi2a.out, Phi2b.out);
+  }
 }
