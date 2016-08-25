@@ -1,7 +1,9 @@
 
 include "StackSyntax.dfy"
 
-predicate method Prefix<A(==)>(s: List<A>, t: List<A>) {
+predicate method Prefix<A(==)>(s: List<A>, t: List<A>)
+  ensures Prefix(s, t) ==> Length(s) <= Length(t)
+{
   match s
   case Nil => true
   case Cons(h, s') => t.Cons? && t.Head == h && Prefix(s', t.Tail)
@@ -210,7 +212,7 @@ lemma SubPhiFlip(s: Phi, t: Phi)
 }
 
 lemma SubPhiSplit(n: nat, Phi1: Phi, Phi2: Phi)
-  requires n < Length(Phi1.out)
+  requires n <= Length(Phi1.out)
   requires SubPhi(Phi1, Phi2)
   ensures  SubPhi(MkPhi(Take(n, Phi1.out)), MkPhi(Take(n, Phi2.out)))
   ensures  SubPhi(MkPhi(Drop(n, Phi1.out)), MkPhi(Drop(n, Phi2.out)))

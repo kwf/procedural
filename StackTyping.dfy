@@ -146,7 +146,6 @@ lemma TypeCommandExpansion(c: command, S1: Sigma, S1_out: Sigma, S2: Sigma)
   requires TypeCommand(c, S1) == Just(S1_out)
   ensures  exists S2_out :: TypeCommand(c, S2) == Just(S2_out)
 {
-  PrefixProperty(S1, S2);
   match c
     case store(n) =>
     case load(n) =>
@@ -197,16 +196,28 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
   var (cs, j) := b;
   var ((PhiR,  S),  Phi_rest)  := Uncons(P.out);
   var ((PhiR', S'), Phi_rest') := Uncons(P'.out);
+  SubPhiSplit(1, P, P');
+  assert Nth(0, P.out) == (PhiR, S);
+  assert Nth(0, P'.out) == (PhiR', S');
+  assert Take(1, P.out) == Cons((PhiR, S), Nil);
+  assert Take(1, P'.out) == Cons((PhiR', S'), Nil);
+  assert Drop(1, P.out) == Phi_rest;
+  assert Drop(1, P'.out) == Phi_rest';
   match TypeCommands(cs, S)
     case Just(S_final) =>
       TypeCommandsExpansion(cs, S, S_final, S');
       var S_final' := TypeCommands(cs, S').FromJust;
+      var aa := MkPhi(Cons((PhiR,  S_final),  Nil));
+      var bb := MkPhi(Cons((PhiR',  S_final'),  Nil));
+      SubPhiJoin(aa, MkPhi(Phi_rest), bb, MkPhi(Phi_rest'));
       match j
         case goto(n) =>
           var Phi_final  := MkPhi(Cons((PhiR,  S_final),  Phi_rest));
           var Phi_final' := MkPhi(Cons((PhiR', S_final'), Phi_rest'));
+          SubPhiSplit(1, Phi_final, Phi_final');
           SubPhiTransitive(D[n], Phi_final, Phi_final');
         case halt =>
+          PrefixTransitive(SigmaH, S_final, S_final');
         case branch(n1, n2) =>
           var (_, S_final)  := Uncons(S_final);
           var (_, S_final') := Uncons(S_final');
@@ -220,6 +231,8 @@ lemma TypeBlockExpansion(D: Delta, SigmaH: Sigma, b: block, P: Phi, P': Phi)
           var Phi_final  := Cons((D[nR], S1),  Cons((PhiR,  S2),  Phi_rest));
           var Phi_final' := Cons((D[nR], S1'), Cons((PhiR', S2'), Phi_rest'));
           SubPhiReflexive(D[nR]);
+          SubPhiSplit(1, MkPhi(Phi_final), MkPhi(Phi_final'));
+          assert SubPhi(MkPhi(Phi_final), MkPhi(Phi_final'));
           SubPhiTransitive(D[nJ], MkPhi(Phi_final), MkPhi(Phi_final'));
         case ret(n) =>
           var (S_check,  _) := Split(n, S_final);
